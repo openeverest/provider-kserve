@@ -1,0 +1,17 @@
+# The provider must reconcile the Instance into a KServe InferenceService with
+# the requested model format, storage URI, and autoscaling bounds, in
+# RawDeployment mode.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: test-kserve-predictor
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  predictor:
+    minReplicas: 1
+    maxReplicas: 3
+    model:
+      modelFormat:
+        name: sklearn
+      storageUri: gs://kfserving-examples/models/sklearn/1.0/model

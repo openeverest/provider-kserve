@@ -1,0 +1,19 @@
+# Create an llm Instance and let the provider translate it into a KServe
+# LLMInferenceService CR.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-kserve-llm
+spec:
+  providerRef:
+    name: provider-kserve
+  topology:
+    type: llm
+  components:
+    llmEngine:
+      type: vllm
+      replicas: 1
+      parameters:
+        modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+        modelName: llama-3.1-8b-instruct
+        tensorParallelSize: 1

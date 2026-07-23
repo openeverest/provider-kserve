@@ -1,0 +1,9 @@
+# generated binaries
+bin/
+# ...except the provider binary, which the dev image (dev/provider.Dockerfile)
+# copies from the build context for the Tilt dev workflow.
+!bin/provider
+# Helm chart dependencies
+charts/
+# test artifacts
+/tmp/

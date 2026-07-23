@@ -1,0 +1,50 @@
+# Example Instance CR for the provider-kserve provider (predictor topology).
+#
+# Serves a predictive model (sklearn, pytorch, tensorflow, xgboost, onnx, ...)
+# via a KServe InferenceService. KServe auto-selects a ServingRuntime from the
+# declared model format.
+#
+# Prerequisites:
+#   1. OpenEverest CRDs installed
+#   2. Provider CR applied (definition/provider.yaml)
+#   3. KServe installed with the InferenceService (v1beta1) CRD
+#   4. Provider controller running
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: sklearn-iris
+  namespace: default
+spec:
+  # Provider reference.
+  providerRef:
+    name: provider-kserve
+
+  # High-level version bundle. Omit to use the provider's default bundle.
+  version: "0.15"
+
+  # Topology configuration — predictive model serving.
+  topology:
+    type: predictor
+
+  components:
+    # Model server (required).
+    predictor:
+      type: modelServer
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      parameters:
+        # Model framework — KServe selects a matching ServingRuntime.
+        modelFormat: sklearn
+        # Model artifacts location.
+        storageURI: gs://kfserving-examples/models/sklearn/1.0/model
+        # Autoscaling bounds (minReplicas: 0 enables scale-to-zero).
+        minReplicas: 1
+        maxReplicas: 3
+        # runtimeVersion: "v2"
+        # runtime: kserve-sklearnserver

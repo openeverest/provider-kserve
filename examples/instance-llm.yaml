@@ -1,0 +1,60 @@
+# Example Instance CR for the provider-kserve provider (llm topology).
+#
+# Serves a Large Language Model with vLLM via a KServe LLMInferenceService.
+# This is the flagship path for OpenAI-compatible LLM inference.
+#
+# Prerequisites:
+#   1. OpenEverest CRDs installed
+#   2. Provider CR applied (definition/provider.yaml)
+#   3. KServe installed with the LLMInferenceService (v1alpha2) CRD
+#   4. Provider controller running
+#   5. GPU nodes available for the model
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: llama-3-1-8b
+  namespace: default
+spec:
+  # Provider reference.
+  providerRef:
+    name: provider-kserve
+
+  # High-level version bundle — selects a curated vLLM runtime version.
+  # Omit to use the provider's default bundle.
+  version: "0.15"
+
+  # Topology configuration — LLM serving.
+  topology:
+    type: llm
+    parameters:
+      # Expose the model through the Gateway API Inference Extension for
+      # prefix-cache aware routing across replicas.
+      enableGatewayRouting: false
+      # Disaggregated prefill/decode (llm-d pattern). Requires enough GPUs.
+      enablePrefill: false
+      # prefillReplicas: 1
+
+  components:
+    # vLLM inference engine (required).
+    llmEngine:
+      type: vllm
+      # Number of decode replicas.
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: 16Gi
+          nvidia.com/gpu: "1"
+        limits:
+          nvidia.com/gpu: "1"
+      parameters:
+        # Model artifacts location (Hugging Face, S3, GCS or PVC).
+        modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+        # Name advertised in the "model" field of inference requests.
+        modelName: llama-3.1-8b-instruct
+        # Split the model across GPUs on a node.
+        tensorParallelSize: 1
+        # pipelineParallelSize: 1
+        # Inherit and override base runtime configs.
+        # baseRefs:
+        #   - kserve-config-llm-decode-worker-data-parallel

@@ -1,0 +1,16 @@
+# The provider must reconcile the Instance into a KServe LLMInferenceService
+# with the requested model URI, name, replicas, and tensor parallelism, in
+# RawDeployment mode.
+apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceService
+metadata:
+  name: test-kserve-llm
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  replicas: 1
+  model:
+    uri: hf://meta-llama/Llama-3.1-8B-Instruct
+    name: llama-3.1-8b-instruct
+  parallelism:
+    tensor: 1

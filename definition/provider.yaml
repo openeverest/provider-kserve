@@ -1,0 +1,14 @@
+# Provider identity and component definitions.
+# Edit this file to add or remove components.
+# Run `make generate` after making changes.
+
+name: provider-kserve
+components:
+  # llmEngine wraps a KServe LLMInferenceService (vLLM). Used by the `llm` topology.
+  llmEngine:
+    type: vllm
+    parametersSchema: VllmCustomSpec
+  # predictor wraps a KServe InferenceService. Used by the `predictor` topology.
+  predictor:
+    type: modelServer
+    parametersSchema: ModelServerCustomSpec

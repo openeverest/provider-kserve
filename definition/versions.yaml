@@ -1,0 +1,36 @@
+# Component type version catalog and version bundles.
+# Add new versions here when KServe / vLLM releases are available.
+# Mark exactly one version per type as `default: true`.
+#
+# Note: KServe auto-selects the ServingRuntime container for the predictor from
+# the model format, and the llmEngine runtime is managed by the LLMInferenceService
+# controller. These images are catalog metadata surfaced to the UI version picker
+# and used for bundle resolution; they are not injected into the CRs directly.
+
+componentTypes:
+  vllm:
+    versions:
+      - version: "0.11.0"
+        image: vllm/vllm-openai:v0.11.0
+        default: true
+      - version: "0.10.1"
+        image: vllm/vllm-openai:v0.10.1
+  modelServer:
+    versions:
+      - version: "0.15.0"
+        image: kserve/kserve-controller:v0.15.0
+        default: true
+      - version: "0.14.1"
+        image: kserve/kserve-controller:v0.14.1
+
+# Version bundles: curated, mutually compatible sets keyed to a KServe release.
+versions:
+  - name: "0.15"
+    default: true
+    components:
+      llmEngine: "0.11.0"
+      predictor: "0.15.0"
+  - name: "0.14"
+    components:
+      llmEngine: "0.10.1"
+      predictor: "0.14.1"

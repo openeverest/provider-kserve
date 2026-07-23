@@ -1,0 +1,72 @@
+# Predictor topology definition.
+# Wraps KServe InferenceService (serving.kserve.io/v1beta1) for general
+# predictive model serving (sklearn, pytorch, tensorflow, xgboost, onnx,
+# triton, huggingface, ...). KServe auto-selects a ServingRuntime from the
+# declared model format.
+#
+# config.components: Which components are used and their defaults.
+# config.parametersSchema: Reference a Go type for topology parameters.
+# ui: Rendering hints for the frontend form.
+#
+# See github.com/openeverest/provider-sdk/blob/main/PROVIDER_DEVELOPMENT.md
+# for detailed guidance.
+config:
+  components:
+    predictor:
+      defaults:
+        replicas: 1
+ui:
+  sections:
+    basicInfo:
+      label: Basic Information
+      description: Configure the model to serve.
+      components:
+        version:
+          uiType: select
+          path: spec.components.predictor.version
+          fieldParams:
+            label: KServe Version
+        modelFormat:
+          uiType: text
+          path: spec.components.predictor.parameters.modelFormat
+          fieldParams:
+            label: Model Format
+            placeholder: sklearn
+          validation:
+            required: true
+        storageURI:
+          uiType: text
+          path: spec.components.predictor.parameters.storageURI
+          fieldParams:
+            label: Model Storage URI
+            placeholder: gs://kfserving-examples/models/sklearn/1.0/model
+          validation:
+            required: true
+        runtimeVersion:
+          uiType: text
+          path: spec.components.predictor.parameters.runtimeVersion
+          fieldParams:
+            label: Runtime Version
+    scaling:
+      label: Scaling
+      description: Configure autoscaling bounds for the predictor.
+      components:
+        minReplicas:
+          uiType: number
+          path: spec.components.predictor.parameters.minReplicas
+          fieldParams:
+            label: Min Replicas
+          validation:
+            min: 0
+            max: 32
+        maxReplicas:
+          uiType: number
+          path: spec.components.predictor.parameters.maxReplicas
+          fieldParams:
+            label: Max Replicas
+          validation:
+            min: 0
+            max: 32
+  sectionsOrder:
+  - basicInfo
+  - scaling

@@ -1,0 +1,45 @@
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: llm
+spec:
+  description: |
+    Lifecycle of an llm Instance: create it, verify the provider derives a
+    KServe LLMInferenceService, simulate the KServe controller marking the
+    service ready, verify the Instance reaches Ready, and verify the
+    LLMInferenceService is garbage collected on deletion.
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get instance,llminferenceservice -o yaml
+  steps:
+    - name: create-llm
+      try:
+        - apply:
+            file: 00-create-llm.yaml
+        - assert:
+            file: 00-assert.yaml
+
+    # Simulate the KServe controller marking the LLMInferenceService ready so the
+    # provider can propagate a Ready phase back to the Instance.
+    - name: llm-ready
+      try:
+        - script:
+            content: |
+              kubectl patch llminferenceservice/test-kserve-llm --subresource status -n $NAMESPACE \
+                --type=merge -p '{"status":{"url":"http://test-kserve-llm.'"$NAMESPACE"'.example.com","conditions":[{"type":"Ready","status":"True","lastTransitionTime":"2026-01-01T00:00:00Z"}]}}'
+        - assert:
+            file: 10-assert.yaml
+
+    - name: delete-llm
+      try:
+        - script:
+            content: kubectl -n $NAMESPACE delete instance/test-kserve-llm --wait=false
+        - error:
+            file: 20-errors.yaml
+        - wait:
+            apiVersion: core.openeverest.io/v1alpha1
+            kind: Instance
+            name: test-kserve-llm
+            for:
+              deletion: {}

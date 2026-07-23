@@ -1,0 +1,24 @@
+# Create a predictor Instance and let the provider translate it into a KServe
+# InferenceService CR.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-kserve-predictor
+spec:
+  providerRef:
+    name: provider-kserve
+  topology:
+    type: predictor
+  components:
+    predictor:
+      type: modelServer
+      replicas: 1
+      resources:
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      parameters:
+        modelFormat: sklearn
+        storageURI: gs://kfserving-examples/models/sklearn/1.0/model
+        minReplicas: 1
+        maxReplicas: 3

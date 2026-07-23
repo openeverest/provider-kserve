@@ -1,0 +1,23 @@
+apiVersion: v2
+name: provider-kserve
+description: A Helm chart for deploying the OpenEverest provider-kserve provider
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - openeverest
+  - provider
+  - database
+home: https://github.com/openeverest/provider-kserve
+sources:
+  - https://github.com/openeverest/provider-kserve
+maintainers:
+  - name: OpenEverest Contributors
+# The provider translates Instances into KServe custom resources, so the KServe
+# CRDs must exist in the cluster. They are vendored under `crds/` (Helm's special
+# CRD directory) rather than as templated subchart resources. This mirrors how
+# provider-valkey's operator chart ships its CRDs and makes install idempotent:
+# Helm installs the CRDs if absent, skips them if present, and never deletes them
+# on uninstall. The CRDs are kept in sync from the pinned KServe chart via
+# `make sync-crds` (run as part of `make generate`). Do not add these CRDs as
+# templated resources or Helm-release-tracked subcharts.

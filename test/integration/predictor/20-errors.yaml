@@ -1,0 +1,6 @@
+# The InferenceService must be garbage collected after the Instance is deleted.
+# Referenced by the `error` step: if it still exists, the step fails.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: test-kserve-predictor

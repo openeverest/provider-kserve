@@ -1,0 +1,101 @@
+# Llm topology definition.
+# Wraps KServe LLMInferenceService (serving.kserve.io/v1alpha2) — the flagship
+# path for serving Large Language Models with vLLM, tensor/pipeline parallelism,
+# optional disaggregated prefill/decode, and Gateway API inference routing.
+#
+# config.components: Which components are used and their defaults.
+# config.parametersSchema: Reference a Go type for topology parameters.
+# ui: Rendering hints for the frontend form.
+#
+# See github.com/openeverest/provider-sdk/blob/main/PROVIDER_DEVELOPMENT.md
+# for detailed guidance.
+config:
+  parametersSchema: LlmTopologyParameters
+  components:
+    llmEngine:
+      defaults:
+        replicas: 1
+ui:
+  sections:
+    basicInfo:
+      label: Basic Information
+      description: Configure the model to serve.
+      components:
+        version:
+          uiType: select
+          path: spec.components.llmEngine.version
+          fieldParams:
+            label: vLLM Runtime Version
+        modelURI:
+          uiType: text
+          path: spec.components.llmEngine.parameters.modelURI
+          fieldParams:
+            label: Model URI
+            placeholder: hf://meta-llama/Llama-3.1-8B-Instruct
+          validation:
+            required: true
+        modelName:
+          uiType: text
+          path: spec.components.llmEngine.parameters.modelName
+          fieldParams:
+            label: Served Model Name
+    scaling:
+      label: Scaling & Parallelism
+      description: Configure replicas and runtime parallelism.
+      components:
+        replicas:
+          uiType: number
+          path: spec.components.llmEngine.replicas
+          fieldParams:
+            label: Replicas
+            defaultValue: 1
+          validation:
+            min: 0
+            max: 32
+        tensorParallelSize:
+          uiType: number
+          path: spec.components.llmEngine.parameters.tensorParallelSize
+          fieldParams:
+            label: Tensor Parallel Size
+          validation:
+            min: 1
+            max: 16
+        pipelineParallelSize:
+          uiType: number
+          path: spec.components.llmEngine.parameters.pipelineParallelSize
+          fieldParams:
+            label: Pipeline Parallel Size
+          validation:
+            min: 1
+            max: 16
+    routing:
+      label: Routing
+      description: Expose the model through the Gateway API Inference Extension for prefix-cache aware routing.
+      components:
+        enableGatewayRouting:
+          uiType: switch
+          path: spec.topology.parameters.enableGatewayRouting
+          fieldParams:
+            label: Enable Gateway API Routing
+    disaggregation:
+      label: Disaggregated Serving
+      description: Split prefill and decode into independently scaled deployments (llm-d pattern).
+      components:
+        enablePrefill:
+          uiType: switch
+          path: spec.topology.parameters.enablePrefill
+          fieldParams:
+            label: Enable Prefill/Decode Disaggregation
+        prefillReplicas:
+          uiType: number
+          path: spec.topology.parameters.prefillReplicas
+          fieldParams:
+            label: Prefill Replicas
+          validation:
+            min: 0
+            max: 32
+  sectionsOrder:
+  - basicInfo
+  - scaling
+  - routing
+  - disaggregation
