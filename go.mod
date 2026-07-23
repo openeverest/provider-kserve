@@ -3,7 +3,7 @@ module github.com/openeverest/provider-kserve
 go 1.26.2
 
 require (
-	github.com/kserve/kserve v0.15.0
+	github.com/kserve/kserve v0.19.0
 	github.com/openeverest/openeverest/v2 v2.0.0-dev.1.0.20260721150452-3ea180918896
 	k8s.io/api v0.36.0
 	k8s.io/apimachinery v0.36.0
@@ -214,7 +214,7 @@ require (
 	knative.dev/networking v0.0.0-20260120131110-a7cdca238a0d // indirect
 	knative.dev/serving v0.48.1 // indirect
 	sigs.k8s.io/gateway-api v1.5.1 // indirect
-	sigs.k8s.io/gateway-api-inference-extension v1.5.0 // indirect
+	sigs.k8s.io/gateway-api-inference-extension v1.3.1 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/mcs-api v0.5.0 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
@@ -223,11 +223,6 @@ require (
 )
 
 tool github.com/openeverest/provider-sdk
-
-// Use the local KServe checkout to guarantee the provider builds against the
-// exact API types (including LLMInferenceService v1alpha2) present in this
-// workspace. Replace with a published version tag for standalone builds.
-replace github.com/kserve/kserve => ../kserve
 
 // The following alignment directives mirror KServe's go.mod. Replace/exclude
 // directives from a dependency are not applied transitively, so importing the

@@ -96,7 +96,7 @@ func (p *Provider) syncPredictor(c *controller.Context) error {
 	if err != nil {
 		return err
 	}
-	return c.Apply(isvc)
+	return common.Apply(c.Context(), c.Client(), c.Instance(), isvc)
 }
 
 // statusPredictor translates the InferenceService status into a provider Status.
@@ -111,9 +111,11 @@ func (p *Provider) statusPredictor(c *controller.Context) (controller.Status, er
 		return controller.ReadyWithConnectionDetails(connectionDetails(isvc.Status.URL)), nil
 	}
 
-	if ready != nil && ready.IsFalse() {
-		return controller.Failed(conditionMessage(ready, "InferenceService is not ready")), nil
-	}
+	// A not-ready InferenceService is still progressing, not failed. KServe
+	// drives Ready through False during normal startup (e.g.
+	// MinimumReplicasUnavailable while the storage-initializer downloads the
+	// model), so surface it as Provisioning and let the condition message
+	// explain the current state rather than flipping the Instance to Failed.
 	return controller.Provisioning(conditionMessage(ready, "InferenceService is being created")), nil
 }
 

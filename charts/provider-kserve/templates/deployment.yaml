@@ -48,10 +48,14 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- with .Values.extraEnv }}
           env:
+            # Secret (with an HF_TOKEN key) the provider attaches to llm
+            # workloads so KServe can download gated HuggingFace models.
+            - name: HF_TOKEN_SECRET_NAME
+              value: {{ .Values.huggingface.tokenSecretName | quote }}
+            {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- end }}
           {{- with .Values.extraVolumeMounts }}
           volumeMounts:
             {{- toYaml . | nindent 12 }}

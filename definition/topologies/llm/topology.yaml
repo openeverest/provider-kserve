@@ -21,17 +21,21 @@ ui:
       label: Basic Information
       description: Configure the model to serve.
       components:
-        version:
-          uiType: select
-          path: spec.components.llmEngine.version
-          fieldParams:
-            label: vLLM Runtime Version
         modelURI:
-          uiType: text
+          uiType: select
           path: spec.components.llmEngine.parameters.modelURI
           fieldParams:
-            label: Model URI
-            placeholder: hf://meta-llama/Llama-3.1-8B-Instruct
+            label: Model
+            # Options are loaded from spec.uiSchema.modelCatalog on the Provider
+            # CR, populated from the chart's `.Values.models` at install time.
+            # spec.uiSchema is a PreserveUnknownFields region in the Provider
+            # CRD, so the injected catalog survives apiserver pruning (a plain
+            # spec.modelCatalog field would be dropped as unknown). Operators
+            # customize the catalog without regenerating this schema.
+            optionsPath: spec.uiSchema.modelCatalog
+            optionsPathConfig:
+              labelPath: label
+              valuePath: uri
           validation:
             required: true
         modelName:
@@ -39,6 +43,22 @@ ui:
           path: spec.components.llmEngine.parameters.modelName
           fieldParams:
             label: Served Model Name
+            placeholder: Defaults to the instance name
+        version:
+          uiType: select
+          path: spec.components.llmEngine.version
+          fieldParams:
+            label: vLLM Runtime Version
+            optionsPath: spec.componentTypes.vllm.versions
+            optionsPathConfig:
+              labelPath: version
+              valuePath: version
+          validation:
+            required: true
+      componentsOrder:
+      - modelURI
+      - modelName
+      - version
     scaling:
       label: Scaling & Parallelism
       description: Configure replicas and runtime parallelism.
@@ -68,6 +88,54 @@ ui:
           validation:
             min: 1
             max: 16
+    runtime:
+      label: Runtime
+      description: Choose the compute profile and size the model server. GPU uses the default CUDA vLLM image; CPU composes a CPU-only vLLM config (via baseRefs) so the model runs without a GPU. CPU/Memory are applied to the model server container per instance.
+      components:
+        computeProfile:
+          uiType: select
+          path: spec.components.llmEngine.parameters.computeProfile
+          fieldParams:
+            label: Compute Profile
+            defaultValue: gpu
+            options:
+            - label: GPU (default)
+              value: gpu
+            - label: CPU
+              value: cpu
+        resources:
+          uiType: group
+          groupType: line
+          components:
+            cpu:
+              uiType: number
+              # Written to the standard component resources field, which the
+              # provider applies to the LLMInferenceService "main" container.
+              # KServe strategic-merges the instance spec last, so this wins over
+              # the preset/baseRefs — a per-instance, finetuned resource sizing.
+              path: spec.components.llmEngine.resources.limits.cpu
+              fieldParams:
+                label: CPU
+                defaultValue: 2
+                step: 1
+              validation:
+                min: 0.5
+                required: true
+            memory:
+              uiType: number
+              path: spec.components.llmEngine.resources.limits.memory
+              fieldParams:
+                label: Memory
+                badge: Gi
+                badgeToApi: true
+                defaultValue: 8
+                step: 1
+              validation:
+                min: 1
+                required: true
+      componentsOrder:
+      - computeProfile
+      - resources
     routing:
       label: Routing
       description: Expose the model through the Gateway API Inference Extension for prefix-cache aware routing.
@@ -97,5 +165,6 @@ ui:
   sectionsOrder:
   - basicInfo
   - scaling
+  - runtime
   - routing
   - disaggregation

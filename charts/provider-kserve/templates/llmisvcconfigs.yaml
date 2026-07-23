@@ -1,0 +1,20 @@
+{{/*
+  KServe LLM preset configs (LLMInferenceServiceConfig).
+
+  The upstream kserve-runtime-configs chart hardcodes these presets to the
+  "kserve" namespace. The llmisvc controller resolves presets from the
+  LLMInferenceService's namespace or from its own POD_NAMESPACE (the release
+  namespace), so hardcoding "kserve" forces the entire stack into that
+  namespace. Instead we render the vendored preset file into the release
+  namespace, keeping the provider installable in any namespace.
+
+  The file is synced verbatim from KServe via `make sync-llm-presets`. The only
+  transformation applied here is rewriting the hardcoded "namespace: kserve" to
+  the release namespace (mirroring KServe's own kserve-common.replaceNamespace
+  helper). The templating markers embedded in the presets are KServe controller
+  templates rendered at reconcile time, not Helm templates, so .Files.Get emits
+  them literally without evaluation.
+*/}}
+{{- if .Values.llmPresets.enabled }}
+{{ .Files.Get "files/llmisvcconfigs/resources.yaml" | replace "namespace: kserve\n" (printf "namespace: %s\n" .Release.Namespace) }}
+{{- end }}

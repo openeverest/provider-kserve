@@ -87,19 +87,26 @@ sync-crds: ## Vendor the KServe CRDs into the chart's crds/ directory from $(KSE
 	@cp $(KSERVE_CHARTS)/kserve-llmisvc-crd/templates/serving.kserve.io_llminferenceserviceconfigs.yaml $(CHART_DIR)/crds/
 	@echo "Done."
 
+.PHONY: sync-llm-presets
+sync-llm-presets: ## Vendor the KServe LLM preset configs into the chart from $(KSERVE_CHARTS).
+	@echo "Syncing KServe LLM preset configs from $(KSERVE_CHARTS) into $(CHART_DIR)/files/..."
+	@mkdir -p $(CHART_DIR)/files/llmisvcconfigs
+	@cp $(KSERVE_CHARTS)/kserve-runtime-configs/files/llmisvcconfigs/resources.yaml $(CHART_DIR)/files/llmisvcconfigs/resources.yaml
+	@echo "Done."
+
 .PHONY: generate
-generate: manifests helm-sync-rbac sync-crds ## Run all code generation (RBAC + Helm sync + CRDs + provider spec from definition/).
+generate: manifests helm-sync-rbac sync-crds sync-llm-presets ## Run all code generation (RBAC + Helm sync + CRDs + LLM presets + provider spec from definition/).
 	go generate ./...
 	@echo "All generation complete."
 
 .PHONY: verify
 verify: ## Verify that generated files are up-to-date (for CI).
 	@$(MAKE) generate
-	@if git diff --quiet -- config/ $(CHART_DIR)/generated/ $(CHART_DIR)/crds/; then \
+	@if git diff --quiet -- config/ $(CHART_DIR)/generated/ $(CHART_DIR)/crds/ $(CHART_DIR)/files/; then \
 		echo "Generated files are up-to-date."; \
 	else \
 		echo "ERROR: Generated files are out of date. Run 'make generate' and commit the changes."; \
-		git diff -- config/ $(CHART_DIR)/generated/ $(CHART_DIR)/crds/; \
+		git diff -- config/ $(CHART_DIR)/generated/ $(CHART_DIR)/crds/ $(CHART_DIR)/files/; \
 		exit 1; \
 	fi
 
@@ -121,6 +128,8 @@ docker-push: ## Push docker image.
 
 .PHONY: helm-deps
 helm-deps: ## Download/update Helm chart dependencies.
+	helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
+	helm repo update jetstack >/dev/null 2>&1 || true
 	helm dependency build $(CHART_DIR)
 
 .PHONY: helm-install

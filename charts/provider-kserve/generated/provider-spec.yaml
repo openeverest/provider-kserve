@@ -25,6 +25,8 @@ spec:
               items:
                 type: string
               type: array
+            computeProfile:
+              type: string
             disableStorageInitializer:
               type: boolean
             modelName:
@@ -85,21 +87,35 @@ spec:
             modelName:
               fieldParams:
                 label: Served Model Name
+                placeholder: Defaults to the instance name
               path: spec.components.llmEngine.parameters.modelName
               uiType: text
             modelURI:
               fieldParams:
-                label: Model URI
-                placeholder: hf://meta-llama/Llama-3.1-8B-Instruct
+                label: Model
+                optionsPath: spec.uiSchema.modelCatalog
+                optionsPathConfig:
+                  labelPath: label
+                  valuePath: uri
               path: spec.components.llmEngine.parameters.modelURI
-              uiType: text
+              uiType: select
               validation:
                 required: true
             version:
               fieldParams:
                 label: vLLM Runtime Version
+                optionsPath: spec.componentTypes.vllm.versions
+                optionsPathConfig:
+                  labelPath: version
+                  valuePath: version
               path: spec.components.llmEngine.version
               uiType: select
+              validation:
+                required: true
+          componentsOrder:
+            - modelURI
+            - modelName
+            - version
           description: Configure the model to serve.
           label: Basic Information
         disaggregation:
@@ -128,6 +144,50 @@ spec:
               uiType: switch
           description: Expose the model through the Gateway API Inference Extension for prefix-cache aware routing.
           label: Routing
+        runtime:
+          components:
+            computeProfile:
+              fieldParams:
+                defaultValue: gpu
+                label: Compute Profile
+                options:
+                  - label: GPU (default)
+                    value: gpu
+                  - label: CPU
+                    value: cpu
+              path: spec.components.llmEngine.parameters.computeProfile
+              uiType: select
+            resources:
+              components:
+                cpu:
+                  fieldParams:
+                    defaultValue: 2
+                    label: CPU
+                    step: 1
+                  path: spec.components.llmEngine.resources.limits.cpu
+                  uiType: number
+                  validation:
+                    min: 0.5
+                    required: true
+                memory:
+                  fieldParams:
+                    badge: Gi
+                    badgeToApi: true
+                    defaultValue: 8
+                    label: Memory
+                    step: 1
+                  path: spec.components.llmEngine.resources.limits.memory
+                  uiType: number
+                  validation:
+                    min: 1
+                    required: true
+              groupType: line
+              uiType: group
+          componentsOrder:
+            - computeProfile
+            - resources
+          description: Choose the compute profile and size the model server. GPU uses the default CUDA vLLM image; CPU composes a CPU-only vLLM config (via baseRefs) so the model runs without a GPU. CPU/Memory are applied to the model server container per instance.
+          label: Runtime
         scaling:
           components:
             pipelineParallelSize:
@@ -160,6 +220,7 @@ spec:
       sectionsOrder:
         - basicInfo
         - scaling
+        - runtime
         - routing
         - disaggregation
     predictor:

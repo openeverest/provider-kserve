@@ -28,6 +28,12 @@ type VllmCustomSpec struct {
 	// (maps to the runtime --pipeline-parallel-size).
 	PipelineParallelSize *int32 `json:"pipelineParallelSize,omitempty"`
 
+	// ComputeProfile selects the compute profile for the workload. "cpu"
+	// composes the CPU-only LLMInferenceServiceConfig (via baseRefs) so the
+	// model runs without a GPU; any other value (default "gpu") uses the bundled
+	// CUDA presets. This is a convenience over setting baseRefs directly.
+	ComputeProfile string `json:"computeProfile,omitempty"`
+
 	// BaseRefs is an ordered list of LLMInferenceServiceConfig names whose specs
 	// are inherited and merged (later entries win, this Instance wins over all).
 	// This is the primary escape hatch for full runtime customization.

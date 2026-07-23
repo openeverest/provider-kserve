@@ -33,3 +33,6 @@ package provider
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch
+// ServiceAccounts carry the HuggingFace token Secret for gated model downloads
+// (attached to the llm workload so KServe injects HF_TOKEN).
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete

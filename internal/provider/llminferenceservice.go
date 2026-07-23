@@ -3,6 +3,7 @@ package provider
 
 import (
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
@@ -15,6 +16,17 @@ import (
 	"github.com/openeverest/provider-kserve/definition/components"
 	"github.com/openeverest/provider-kserve/definition/topologies/llm"
 	"github.com/openeverest/provider-kserve/internal/common"
+)
+
+const (
+	// computeProfileCPU is the VllmCustomSpec.ComputeProfile value that composes
+	// the CPU-only LLMInferenceServiceConfig instead of the default GPU presets.
+	computeProfileCPU = "cpu"
+
+	// cpuProfileConfigName is the name of the bundled CPU LLMInferenceServiceConfig
+	// rendered by the chart (templates/llmisvcconfig-cpu.yaml). It must match the
+	// chart's metadata.name.
+	cpuProfileConfigName = "kserve-config-llm-cpu"
 )
 
 // validateLLM checks the Instance spec for the llm topology.
@@ -73,7 +85,9 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		}
 	}
 
-	// Optional pod resource requirements from the component spec.
+	// Optional pod resource requirements from the component spec. KServe
+	// strategic-merges the Instance spec last, so a "main" container override
+	// here wins over the preset and any baseRefs.
 	if comp.Resources != nil {
 		spec.WorkloadSpec.Template = &corev1.PodSpec{
 			Containers: []corev1.Container{{
@@ -83,7 +97,24 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		}
 	}
 
-	// Config inheritance.
+	// Attach the HuggingFace token ServiceAccount (created by
+	// ensureModelPullerServiceAccount) so KServe's storage-initializer can
+	// authenticate gated model downloads. KServe honors a user-set workload
+	// ServiceAccountName only when no routing sidecar is present, so this path
+	// covers the common (non-gateway-routing) gated download case.
+	if common.HFTokenSecretName() != "" {
+		if spec.WorkloadSpec.Template == nil {
+			spec.WorkloadSpec.Template = &corev1.PodSpec{}
+		}
+		spec.WorkloadSpec.Template.ServiceAccountName = modelPullerSAName(c.Name())
+	}
+
+	// Config inheritance. The CPU compute profile composes the bundled CPU-only
+	// LLMInferenceServiceConfig ahead of any user baseRefs, so an explicit
+	// baseRef still wins on conflict (later refs override earlier ones).
+	if strings.EqualFold(params.ComputeProfile, computeProfileCPU) {
+		spec.BaseRefs = append(spec.BaseRefs, corev1.LocalObjectReference{Name: cpuProfileConfigName})
+	}
 	for _, ref := range params.BaseRefs {
 		spec.BaseRefs = append(spec.BaseRefs, corev1.LocalObjectReference{Name: ref})
 	}
@@ -129,11 +160,39 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 
 // syncLLM creates or updates the LLMInferenceService.
 func (p *Provider) syncLLM(c *controller.Context) error {
+	// Provision the HuggingFace token ServiceAccount before the workload so
+	// KServe finds it when it reconciles the storage-initializer.
+	if common.HFTokenSecretName() != "" {
+		if err := ensureModelPullerServiceAccount(c); err != nil {
+			return err
+		}
+	}
+
 	llmisvc, err := buildLLMInferenceService(c)
 	if err != nil {
 		return err
 	}
-	return c.Apply(llmisvc)
+	return common.Apply(c.Context(), c.Client(), c.Instance(), llmisvc)
+}
+
+// modelPullerSAName is the ServiceAccount the provider creates to carry the
+// HuggingFace token Secret for an Instance's llm workload.
+func modelPullerSAName(instance string) string {
+	return instance + "-model-puller"
+}
+
+// ensureModelPullerServiceAccount creates/updates a ServiceAccount referencing
+// the configured HuggingFace token Secret. KServe's llmisvc storage path reads
+// the Secrets listed on the workload ServiceAccount and injects HF_TOKEN into
+// the storage-initializer, enabling gated model downloads.
+func ensureModelPullerServiceAccount(c *controller.Context) error {
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: c.ObjectMeta(modelPullerSAName(c.Name())),
+		Secrets: []corev1.ObjectReference{
+			{Name: common.HFTokenSecretName()},
+		},
+	}
+	return common.Apply(c.Context(), c.Client(), c.Instance(), sa)
 }
 
 // statusLLM translates the LLMInferenceService status into a provider Status.
@@ -148,8 +207,10 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 		return controller.ReadyWithConnectionDetails(connectionDetails(llmisvc.Status.URL)), nil
 	}
 
-	if ready != nil && ready.IsFalse() {
-		return controller.Failed(conditionMessage(ready, "LLMInferenceService is not ready")), nil
-	}
+	// A not-ready LLMInferenceService is still progressing, not failed. KServe
+	// drives Ready through False during normal startup (e.g.
+	// MinimumReplicasUnavailable while the storage-initializer downloads the
+	// model), so surface it as Provisioning and let the condition message
+	// explain the current state rather than flipping the Instance to Failed.
 	return controller.Provisioning(conditionMessage(ready, "LLMInferenceService is being created")), nil
 }

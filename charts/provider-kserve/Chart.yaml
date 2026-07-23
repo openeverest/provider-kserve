@@ -21,3 +21,48 @@ maintainers:
 # on uninstall. The CRDs are kept in sync from the pinned KServe chart via
 # `make sync-crds` (run as part of `make generate`). Do not add these CRDs as
 # templated resources or Helm-release-tracked subcharts.
+#
+# The provider only translates Instances into KServe custom resources — it does
+# not reconcile them. The KServe controllers that do are bundled as subchart
+# dependencies so a single `helm install` yields a working stack (mirroring how
+# provider-valkey bundles the valkey-operator). Each controller and cert-manager
+# can be toggled off via values (see values.yaml) when managed out of band.
+#
+# The KServe charts are pulled from KServe's published OCI registry
+# (oci://ghcr.io/kserve/charts) pinned to the same version as the vendored CRDs.
+# Run `make helm-deps` to vendor the dependencies into `charts/`.
+dependencies:
+  # cert-manager issues the admission-webhook certificates the KServe
+  # controllers require. Installed by default; set `cert-manager.enabled=false`
+  # when the cluster already provides cert-manager (a common case).
+  - name: cert-manager
+    version: "v1.16.2"
+    repository: https://charts.jetstack.io
+    condition: cert-manager.enabled
+  # KServe InferenceService controller + webhook — reconciles the predictor
+  # topology. Owns the shared KServe resources (config ConfigMap, self-signed
+  # Issuer, ClusterStorageContainer).
+  - name: kserve-resources
+    alias: kserveResources
+    version: "v0.19.0"
+    repository: "oci://ghcr.io/kserve/charts"
+    condition: kserveResources.enabled
+  # KServe LLMInferenceService controller + webhook — reconciles the llm
+  # topology (vLLM). Shared resources are disabled here to avoid colliding with
+  # kserve-resources (see values.yaml).
+  - name: kserve-llmisvc-resources
+    alias: kserveLlmisvcResources
+    version: "v0.19.0"
+    repository: "oci://ghcr.io/kserve/charts"
+    condition: kserveLlmisvcResources.enabled
+  # KServe runtime configurations — ships the well-known LLMInferenceServiceConfig
+  # presets the llmisvc controller resolves (kserve-config-llm-*) and the
+  # ClusterServingRuntimes the InferenceService controller selects by model
+  # format. Without these the llm topology stalls with ConfigNotFound and the
+  # predictor topology has no runtime to schedule.
+  - name: kserve-runtime-configs
+    alias: kserveRuntimeConfigs
+    version: "v0.19.0"
+    repository: "oci://ghcr.io/kserve/charts"
+    condition: kserveRuntimeConfigs.enabled
+

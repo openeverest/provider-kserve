@@ -1,0 +1,45 @@
+{{/*
+  CPU compute profile LLMInferenceServiceConfig.
+
+  Layers a CPU-only vLLM image over the well-known `kserve-config-llm-template`
+  base via strategic merge. The llm topology adds this config to an
+  LLMInferenceService's `baseRefs` when the user selects the "CPU" compute
+  profile (parameters.computeProfile: cpu). The base template's command uses the
+  generic `vllm` CLI, so overriding only the image keeps the inherited command,
+  env, and probes intact.
+
+  This config intentionally sets NO resources: CPU/memory are tuned per instance
+  in the llm topology's Runtime section and applied to the "main" container of
+  the LLMInferenceService, which strategic-merges last (highest priority). That
+  keeps resource sizing finetuned per instance rather than shared here.
+
+  Rendered into the release namespace so the llmisvc controller — which resolves
+  configs from the instance namespace or its own POD_NAMESPACE — finds it from
+  any instance namespace, mirroring the other presets.
+
+  The metadata.name must match `cpuProfileConfigName` in
+  internal/provider/llminferenceservice.go.
+
+  Use apiVersion serving.kserve.io/v1alpha2 (the CRD storage version, matching
+  the vendored presets). Authoring it as v1alpha1 forces the API server to run
+  the llmisvc conversion webhook on create, which fails during install because
+  that webhook is deployed by this same release and is not yet reachable.
+*/}}
+{{- if and .Values.cpuProfile.enabled .Values.llmPresets.enabled }}
+apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceServiceConfig
+metadata:
+  name: kserve-config-llm-cpu
+  namespace: {{ .Release.Namespace }}
+spec:
+  template:
+    containers:
+    - name: main
+      image: {{ .Values.cpuProfile.image | quote }}
+      # The published CPU vLLM images run as root, but the base preset sets
+      # runAsNonRoot: true, so the kubelet refuses to start the container.
+      # Override the container securityContext to allow root for this profile.
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+{{- end }}

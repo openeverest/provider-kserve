@@ -46,10 +46,22 @@ openeverest_helm_repo = os.getenv(
 
 # Namespaces.
 everest_namespace = os.getenv('EVEREST_NAMESPACE', 'everest-system')
+# The provider bundles the KServe controllers and the KServe runtime configs
+# (LLMInferenceServiceConfig presets + ClusterServingRuntimes). The presets are
+# rendered into the release namespace by the provider chart, and the llmisvc
+# controller resolves them from its own POD_NAMESPACE, so the stack works in any
+# namespace. Override PROVIDER_NAMESPACE to install elsewhere.
 provider_namespace = os.getenv('PROVIDER_NAMESPACE', 'default')
 
 # Whether to deploy MinIO + a BackupStorage CR for testing backups/restores.
 enable_minio = str2bool(os.getenv('ENABLE_MINIO', 'false'))
+
+# Whether to install cert-manager. The KServe controllers require it for their
+# admission-webhook certificates. Installed as its own release (rather than the
+# bundled subchart) so the dev loop is reliable on fresh clusters. Set to false
+# when the cluster already runs cert-manager.
+install_cert_manager = str2bool(os.getenv('INSTALL_CERT_MANAGER', 'true'))
+cert_manager_version = os.getenv('CERT_MANAGER_VERSION', 'v1.16.2')
 
 # Go build environment for the provider binary.
 provider_build_env = os.getenv('PROVIDER_BUILD_ENV', 'CGO_ENABLED=0 GOOS=linux')
@@ -169,6 +181,49 @@ docker_build_with_restart(
 )
 
 # ===========================
+# cert-manager (webhook certs for the KServe controllers)
+# ===========================
+# Both bundled KServe controllers run admission webhooks whose certificates are
+# issued by cert-manager. The provider chart can bundle cert-manager, but
+# installing it in the same Helm release as the resources that consume it races
+# on a fresh cluster (the cert-manager webhook isn't ready when the Issuer /
+# Certificate objects are admitted). So in dev we install cert-manager as its
+# own release and disable the bundled copy below — this also mirrors the common
+# production case where cert-manager already exists in the cluster.
+if install_cert_manager:
+    helm_repo(
+        'jetstack',
+        'https://charts.jetstack.io',
+        labels=['cert-manager'],
+    )
+    helm_resource(
+        'cert-manager',
+        'jetstack/cert-manager',
+        release_name='cert-manager',
+        namespace='cert-manager',
+        flags=[
+            '--create-namespace',
+            '--version', cert_manager_version,
+            '--set', 'crds.enabled=true',
+        ],
+        resource_deps=['jetstack'],
+        labels=['cert-manager'],
+    )
+
+# ===========================
+# Provider chart: Helm dependencies
+# ===========================
+# The provider chart bundles the KServe controllers (kserve-resources,
+# kserve-llmisvc-resources) and cert-manager as subchart dependencies. Vendor
+# them into charts/ before the chart is installed.
+local_resource(
+    'provider-helm-deps',
+    'make -C {0} helm-deps'.format(provider_dir),
+    deps=['{0}/charts/provider-kserve/Chart.yaml'.format(provider_dir)],
+    labels=['provider'],
+)
+
+# ===========================
 # Provider: Helm chart
 # ===========================
 # Deployed with a real `helm upgrade --install` (via the helm_resource
@@ -179,11 +234,15 @@ docker_build_with_restart(
 #
 # The KServe CRDs are vendored under charts/provider-kserve/crds/ and installed
 # automatically by Helm's crds/ handling (idempotent, never deleted on
-# uninstall), so no `helm dependency build` step is required.
+# uninstall). The KServe controllers reconcile the InferenceService /
+# LLMInferenceService resources the provider creates; cert-manager is installed
+# separately above, so the bundled copy is disabled here.
 
-provider_resource_deps = ['provider-build']
+provider_resource_deps = ['provider-build', 'provider-helm-deps']
 if install_openeverest:
     provider_resource_deps = provider_resource_deps + ['openeverest']
+if install_cert_manager:
+    provider_resource_deps = provider_resource_deps + ['cert-manager']
 
 helm_resource(
     'provider-kserve',
@@ -193,6 +252,8 @@ helm_resource(
         '--create-namespace',
         '--set', 'image.pullPolicy=IfNotPresent',
         '--set', 'securityContext.readOnlyRootFilesystem=false',
+        # cert-manager is installed as its own release above.
+        '--set', 'cert-manager.enabled=false',
     ],
     image_deps=[provider_image],
     image_keys=[('image.repository', 'image.tag')],
