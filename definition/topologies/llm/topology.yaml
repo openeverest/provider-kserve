@@ -26,13 +26,15 @@ ui:
           path: spec.components.llmEngine.parameters.modelURI
           fieldParams:
             label: Model
-            # Options are loaded from spec.uiSchema.modelCatalog on the Provider
-            # CR, populated from the chart's `.Values.models` at install time.
-            # spec.uiSchema is a PreserveUnknownFields region in the Provider
-            # CRD, so the injected catalog survives apiserver pruning (a plain
-            # spec.modelCatalog field would be dropped as unknown). Operators
+            # Options are loaded from spec.uiSchema.llm.modelCatalog on the
+            # Provider CR, populated from the chart's `.Values.models` at install
+            # time. spec.uiSchema is a PreserveUnknownFields region in the
+            # Provider CRD, so the injected catalog survives apiserver pruning (a
+            # plain spec.modelCatalog field would be dropped as unknown). It is
+            # nested inside the `llm` topology node so it is not enumerated as a
+            # selectable topology in the UI's topology dropdown. Operators
             # customize the catalog without regenerating this schema.
-            optionsPath: spec.uiSchema.modelCatalog
+            optionsPath: spec.uiSchema.llm.modelCatalog
             optionsPathConfig:
               labelPath: label
               valuePath: uri
@@ -77,6 +79,7 @@ ui:
           path: spec.components.llmEngine.parameters.tensorParallelSize
           fieldParams:
             label: Tensor Parallel Size
+            defaultValue: 1
           validation:
             min: 1
             max: 16
@@ -85,6 +88,7 @@ ui:
           path: spec.components.llmEngine.parameters.pipelineParallelSize
           fieldParams:
             label: Pipeline Parallel Size
+            defaultValue: 1
           validation:
             min: 1
             max: 16
@@ -128,14 +132,30 @@ ui:
                 label: Memory
                 badge: Gi
                 badgeToApi: true
-                defaultValue: 8
+                defaultValue: 16
                 step: 1
               validation:
                 min: 1
                 required: true
+        kvCacheSpaceGi:
+          uiType: number
+          # CPU profile only. Overrides VLLM_CPU_KVCACHE_SPACE (GiB). Left empty,
+          # vLLM auto-sizes the KV cache from the memory that is free at startup,
+          # which adapts to the node — recommended. Only set this to cap the KV
+          # cache to a specific size; vLLM refuses to start if it exceeds the
+          # host-free memory at that moment (the CPU runtime footprint is large
+          # and model-independent), so keep it small unless Memory is generous.
+          path: spec.components.llmEngine.parameters.kvCacheSpaceGi
+          fieldParams:
+            label: CPU KV Cache Space
+            badge: Gi
+            placeholder: Auto (vLLM sizes from free memory)
+          validation:
+            min: 1
       componentsOrder:
       - computeProfile
       - resources
+      - kvCacheSpaceGi
     routing:
       label: Routing
       description: Expose the model through the Gateway API Inference Extension for prefix-cache aware routing.
@@ -145,6 +165,7 @@ ui:
           path: spec.topology.parameters.enableGatewayRouting
           fieldParams:
             label: Enable Gateway API Routing
+            defaultValue: false
     disaggregation:
       label: Disaggregated Serving
       description: Split prefill and decode into independently scaled deployments (llm-d pattern).
@@ -154,17 +175,46 @@ ui:
           path: spec.topology.parameters.enablePrefill
           fieldParams:
             label: Enable Prefill/Decode Disaggregation
+            defaultValue: false
         prefillReplicas:
           uiType: number
           path: spec.topology.parameters.prefillReplicas
           fieldParams:
             label: Prefill Replicas
+            defaultValue: 1
           validation:
             min: 0
             max: 32
+    advanced:
+      label: Advanced
+      description: >-
+        Provide a custom LLMInferenceServiceConfig spec (YAML) for runtime
+        settings not exposed above — extra vLLM args, env vars, or scheduling.
+        The provider creates a config owned by this instance and merges it via
+        baseRefs; it overrides the compute-profile preset, while the structured
+        fields above still take precedence. Enter only the config spec body.
+      components:
+        config:
+          uiType: text
+          path: spec.components.llmEngine.parameters.config
+          fieldParams:
+            label: LLMInferenceServiceConfig (spec)
+            multiline: true
+            minRows: 4
+            maxRows: 20
+            placeholder: |2
+              template:
+                containers:
+                  - name: main
+                    args:
+                      - --enforce-eager
+                      - --max-model-len=2048
+      componentsOrder:
+      - config
   sectionsOrder:
   - basicInfo
   - scaling
   - runtime
   - routing
   - disaggregation
+  - advanced

@@ -34,10 +34,27 @@ type VllmCustomSpec struct {
 	// CUDA presets. This is a convenience over setting baseRefs directly.
 	ComputeProfile string `json:"computeProfile,omitempty"`
 
+	// KVCacheSpaceGi overrides VLLM_CPU_KVCACHE_SPACE (GiB) for the CPU profile.
+	// Left unset, vLLM auto-sizes the KV cache from the memory that is free at
+	// startup (recommended), which adapts to the node. Set it only to cap the KV
+	// cache to a specific size; vLLM refuses to start if it exceeds host-free
+	// memory at that moment. Ignored for the GPU profile.
+	KVCacheSpaceGi *int32 `json:"kvCacheSpaceGi,omitempty"`
+
 	// BaseRefs is an ordered list of LLMInferenceServiceConfig names whose specs
 	// are inherited and merged (later entries win, this Instance wins over all).
 	// This is the primary escape hatch for full runtime customization.
 	BaseRefs []string `json:"baseRefs,omitempty"`
+
+	// Config is an inline LLMInferenceServiceConfig spec body (YAML) authored in
+	// the UI's Advanced section. The provider materializes it as an
+	// Instance-owned LLMInferenceServiceConfig and attaches it to the generated
+	// LLMInferenceService via baseRefs (last, so it overrides presets and any
+	// BaseRefs above, while the Instance's own structured fields still win). Use
+	// it for runtime settings not exposed as first-class fields (extra vLLM
+	// args, env, scheduling). Only the config spec body is provided here; the
+	// provider supplies metadata.
+	Config string `json:"config,omitempty"`
 
 	// DisableStorageInitializer skips the storage-initializer init container.
 	// Useful when models are pre-loaded via a LocalModelCache, modelcar, or an

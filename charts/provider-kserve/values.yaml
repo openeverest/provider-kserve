@@ -104,7 +104,7 @@ provider:
 # ---------------------------------------------------------------------------
 # LLM model catalog.
 #
-# This list is rendered into the Provider CR (spec.uiSchema.modelCatalog) and
+# This list is rendered into the Provider CR (spec.uiSchema.llm.modelCatalog) and
 # surfaced in the "Model" dropdown of the `llm` topology form. Edit it to add, remove,
 # or reorder models — changes take effect on `helm upgrade`, no regeneration
 # needed. Each entry:
@@ -116,6 +116,8 @@ provider:
 # -- Models offered in the llm topology model picker
 models:
   # --- Tiny, CPU-friendly ungated models (run without a GPU) ---
+  - label: "OPT 125M"
+    uri: "hf://facebook/opt-125m"
   - label: "SmolLM2 135M Instruct"
     uri: "hf://HuggingFaceTB/SmolLM2-135M-Instruct"
   - label: "SmolLM2 360M Instruct"
@@ -289,6 +291,17 @@ cpuProfile:
   # -- CPU-capable vLLM image used by the CPU profile. The bundled GPU presets
   # use a CUDA image that cannot run on CPU nodes, so this must be a CPU build.
   image: vllm/vllm-openai-cpu:v0.25.1
+  # -- Default vLLM args applied to the CPU profile's model-server container.
+  # These keep vLLM CPU within a modest node: cap the startup memory reservation
+  # (--gpu-memory-utilization, which governs CPU memory despite its name), skip
+  # torch.compile (--enforce-eager), and shrink the KV arena (--max-model-len).
+  # They are the *defaults*; a per-instance Advanced (inline
+  # LLMInferenceServiceConfig) `args` on the `main` container replaces this whole
+  # list, so users can override any of them. Set to [] to apply no defaults.
+  defaultArgs:
+    - --gpu-memory-utilization=0.3
+    - --enforce-eager
+    - --max-model-len=2048
   # NOTE: CPU/memory are NOT set here. They are tuned per instance in the llm
   # topology's Runtime section (spec.components.llmEngine.resources) and applied
   # to the model server container, so sizing is finetuned per instance rather

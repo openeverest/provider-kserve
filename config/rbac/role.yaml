@@ -86,6 +86,7 @@ rules:
   - serving.kserve.io
   resources:
   - inferenceservices
+  - llminferenceserviceconfigs
   - llminferenceservices
   verbs:
   - create
@@ -109,11 +110,3 @@ rules:
   - llminferenceservices/status
   verbs:
   - get
-- apiGroups:
-  - serving.kserve.io
-  resources:
-  - llminferenceserviceconfigs
-  verbs:
-  - get
-  - list
-  - watch

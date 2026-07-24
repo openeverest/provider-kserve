@@ -107,8 +107,14 @@ func (p *Provider) statusPredictor(c *controller.Context) (controller.Status, er
 	}
 
 	ready := isvc.Status.GetCondition(apis.ConditionReady)
-	if ready != nil && ready.IsTrue() && isvc.Status.URL != nil {
-		return controller.ReadyWithConnectionDetails(connectionDetails(isvc.Status.URL)), nil
+	if ready != nil && ready.IsTrue() {
+		// A Ready service without external ingress exposes only the in-cluster
+		// Service and KServe leaves Status.URL empty, so surface Ready with
+		// connection details only when a URL is actually published.
+		if isvc.Status.URL != nil {
+			return controller.ReadyWithConnectionDetails(connectionDetails(isvc.Status.URL)), nil
+		}
+		return controller.Ready(), nil
 	}
 
 	// A not-ready InferenceService is still progressing, not failed. KServe

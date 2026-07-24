@@ -32,6 +32,7 @@ func New() *Provider {
 			},
 			WatchConfigs: []controller.WatchConfig{
 				controller.WatchOwned(&kservev1alpha2.LLMInferenceService{}),
+				controller.WatchOwned(&kservev1alpha2.LLMInferenceServiceConfig{}),
 				controller.WatchOwned(&kservev1beta1.InferenceService{}),
 			},
 		},
@@ -91,7 +92,12 @@ func (p *Provider) Cleanup(c *controller.Context) error {
 
 	switch c.Instance().GetTopologyType() {
 	case common.TopologyLLM:
-		return c.Delete(&kservev1alpha2.LLMInferenceService{ObjectMeta: c.ObjectMeta(c.Name())})
+		if err := c.Delete(&kservev1alpha2.LLMInferenceService{ObjectMeta: c.ObjectMeta(c.Name())}); err != nil {
+			return err
+		}
+		// The inline Advanced config is owner-ref garbage-collected; delete it
+		// explicitly too (no-op when absent).
+		return c.Delete(&kservev1alpha2.LLMInferenceServiceConfig{ObjectMeta: c.ObjectMeta(instanceConfigName(c.Name()))})
 	case common.TopologyPredictor:
 		return c.Delete(&kservev1beta1.InferenceService{ObjectMeta: c.ObjectMeta(c.Name())})
 	default:

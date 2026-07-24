@@ -57,7 +57,7 @@ Deployments + HPA, no Knative dependency).
 The models offered in the `llm` topology's **Model** dropdown are **not**
 hardcoded in the generated schema — they are driven by the chart's
 `.Values.models` and rendered into the `Provider` CR at install time
-(`spec.uiSchema.modelCatalog`). Edit the list to add, remove, or reorder models;
+(`spec.uiSchema.llm.modelCatalog`). Edit the list to add, remove, or reorder models;
 changes take effect on `helm upgrade`, with no regeneration required.
 
 ```yaml
@@ -80,12 +80,14 @@ The default catalog ships a range of ungated models (including tiny,
 CPU-friendly ones such as SmolLM2 135M/360M, Qwen2.5 0.5B, and TinyLlama 1.1B)
 plus common gated models.
 
-> The UI resolves the dropdown from `spec.uiSchema.modelCatalog` on the
+> The UI resolves the dropdown from `spec.uiSchema.llm.modelCatalog` on the
 > `Provider` CR (there is no runtime ConfigMap lookup), which is why the catalog
 > is rendered from Helm values rather than read at request time. It lives under
 > `spec.uiSchema` because that is the Provider CRD's only
 > `PreserveUnknownFields` region — a top-level `spec.modelCatalog` field would be
-> pruned by the apiserver as an unknown field.
+> pruned by the apiserver as an unknown field. It is nested inside the `llm`
+> topology node (not a top-level `uiSchema` key) so it is not enumerated as a
+> selectable topology in the UI's topology dropdown.
 
 ### Gated models (HuggingFace token)
 
@@ -138,11 +140,98 @@ so it resolves for instances in any namespace. It requires `llmPresets.enabled`
 (it layers onto those presets). Use `baseRefs` directly if you need a fully
 custom `LLMInferenceServiceConfig` instead.
 
+### CPU memory sizing
+
+vLLM CPU has a large, model-independent runtime footprint — the torch import and
+compilation in the worker consume **several GiB before the model or KV cache are
+loaded** (it can be ~5 GiB even for a 125M model). On top of that, vLLM is **not**
+cgroup-aware, and two independent startup checks apply:
+
+- **Startup reservation** — vLLM reserves `--gpu-memory-utilization` × the
+  detected memory (on the CPU backend this flag controls *CPU* memory despite
+  its name; default `0.92`) and validates it against the memory that is *free*
+  when the worker starts. Once the runtime footprint is loaded, the 0.92 default
+  overshoots what is free and fails with
+  `Available memory on node … on startup is less than desired CPU memory utilization`.
+- **KV cache** — `VLLM_CPU_KVCACHE_SPACE`, if set, then carves the KV cache out
+  of that reservation and is likewise checked against free memory.
+
+To make the CPU profile start on a modest node, the `kserve-config-llm-cpu`
+preset applies a set of default vLLM args (`cpuProfile.defaultArgs`) to the
+model-server container:
+
+```yaml
+cpuProfile:
+  defaultArgs:
+    - --gpu-memory-utilization=0.3   # don't pre-grab 92% of memory
+    - --enforce-eager                # skip torch.compile
+    - --max-model-len=2048           # smaller context = smaller KV arena
+```
+
+These flow into the vLLM command as container args. To override them for a
+single instance, set `args` on the `main` container in the topology's
+**Advanced** (inline `LLMInferenceServiceConfig`) section — KServe treats a
+container's `args` as atomic, so your list **replaces** the preset defaults
+entirely (re-specify any you still want):
+
+```yaml
+config: |
+  template:
+    containers:
+      - name: main
+        args:
+          - --gpu-memory-utilization=0.5
+          - --max-model-len=4096
+```
+
+Set **CPU KV Cache Space** (`parameters.kvCacheSpaceGi`) only to additionally cap
+`VLLM_CPU_KVCACHE_SPACE`.
+
+The provider also mirrors the memory (and CPU) **limit into the request**
+(Guaranteed QoS) so the scheduler reserves that memory on the node.
+
+**Size memory generously.** Because of the multi-GiB runtime floor, a tight
+limit (e.g. 8 GiB) leaves too little free for even a modest reservation and fails
+the startup check regardless of model size. Give CPU instances enough headroom
+above that floor, and/or lower `--gpu-memory-utilization`.
+
+### Advanced customization (inline config)
+
+The structured fields cover the common knobs (model, resources, parallelism, KV
+cache). For anything else — extra vLLM args, environment variables, scheduling —
+use the **Advanced** section (`llmEngine.parameters.config`) to author an inline
+`LLMInferenceServiceConfig` **spec body**:
+
+```yaml
+components:
+  llmEngine:
+    parameters:
+      config: |
+        template:
+          containers:
+            - name: main
+              args:
+                - --enforce-eager      # skip torch.compile (lowers CPU memory)
+                - --max-model-len=2048 # cap context length (shrinks KV cache)
+```
+
+On reconcile the provider materializes this as an `LLMInferenceServiceConfig`
+named `<instance>-config` in the Instance's namespace, owned by the Instance
+(so it is garbage-collected with it), and attaches it to the
+`LLMInferenceService` via `baseRefs`. It is applied **last**, so it overrides the
+compute-profile preset and any `baseRefs` you set, while the Instance's own
+structured fields (model, resources, the derived KV cache env) still win over it.
+Enter only the config spec body — the provider supplies the metadata.
+
+To reference *pre-existing* shared configs instead of authoring one inline, list
+their names in `llmEngine.parameters.baseRefs` (API-only).
+
 ## Usage
 
 See [examples/](examples/) for complete `Instance` manifests:
 
 - [examples/instance-llm.yaml](examples/instance-llm.yaml) — serve Llama 3.1 8B with vLLM.
+- [examples/instance-llm-cpu.yaml](examples/instance-llm-cpu.yaml) — serve a small model on CPU (compute profile, KV cache sizing, inline advanced config).
 - [examples/instance-predictor.yaml](examples/instance-predictor.yaml) — serve an sklearn model.
 
 ## Development

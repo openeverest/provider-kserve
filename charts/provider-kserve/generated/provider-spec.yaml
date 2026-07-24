@@ -27,8 +27,13 @@ spec:
               type: array
             computeProfile:
               type: string
+            config:
+              type: string
             disableStorageInitializer:
               type: boolean
+            kvCacheSpaceGi:
+              format: int32
+              type: integer
             modelName:
               type: string
             modelURI:
@@ -82,6 +87,27 @@ spec:
   uiSchema:
     llm:
       sections:
+        advanced:
+          components:
+            config:
+              fieldParams:
+                label: LLMInferenceServiceConfig (spec)
+                maxRows: 20
+                minRows: 4
+                multiline: true
+                placeholder: |
+                  template:
+                    containers:
+                      - name: main
+                        args:
+                          - --enforce-eager
+                          - --max-model-len=2048
+              path: spec.components.llmEngine.parameters.config
+              uiType: text
+          componentsOrder:
+            - config
+          description: Provide a custom LLMInferenceServiceConfig spec (YAML) for runtime settings not exposed above — extra vLLM args, env vars, or scheduling. The provider creates a config owned by this instance and merges it via baseRefs; it overrides the compute-profile preset, while the structured fields above still take precedence. Enter only the config spec body.
+          label: Advanced
         basicInfo:
           components:
             modelName:
@@ -93,7 +119,7 @@ spec:
             modelURI:
               fieldParams:
                 label: Model
-                optionsPath: spec.uiSchema.modelCatalog
+                optionsPath: spec.uiSchema.llm.modelCatalog
                 optionsPathConfig:
                   labelPath: label
                   valuePath: uri
@@ -122,11 +148,13 @@ spec:
           components:
             enablePrefill:
               fieldParams:
+                defaultValue: false
                 label: Enable Prefill/Decode Disaggregation
               path: spec.topology.parameters.enablePrefill
               uiType: switch
             prefillReplicas:
               fieldParams:
+                defaultValue: 1
                 label: Prefill Replicas
               path: spec.topology.parameters.prefillReplicas
               uiType: number
@@ -139,6 +167,7 @@ spec:
           components:
             enableGatewayRouting:
               fieldParams:
+                defaultValue: false
                 label: Enable Gateway API Routing
               path: spec.topology.parameters.enableGatewayRouting
               uiType: switch
@@ -157,6 +186,15 @@ spec:
                     value: cpu
               path: spec.components.llmEngine.parameters.computeProfile
               uiType: select
+            kvCacheSpaceGi:
+              fieldParams:
+                badge: Gi
+                label: CPU KV Cache Space
+                placeholder: Auto (vLLM sizes from free memory)
+              path: spec.components.llmEngine.parameters.kvCacheSpaceGi
+              uiType: number
+              validation:
+                min: 1
             resources:
               components:
                 cpu:
@@ -173,7 +211,7 @@ spec:
                   fieldParams:
                     badge: Gi
                     badgeToApi: true
-                    defaultValue: 8
+                    defaultValue: 16
                     label: Memory
                     step: 1
                   path: spec.components.llmEngine.resources.limits.memory
@@ -186,12 +224,14 @@ spec:
           componentsOrder:
             - computeProfile
             - resources
+            - kvCacheSpaceGi
           description: Choose the compute profile and size the model server. GPU uses the default CUDA vLLM image; CPU composes a CPU-only vLLM config (via baseRefs) so the model runs without a GPU. CPU/Memory are applied to the model server container per instance.
           label: Runtime
         scaling:
           components:
             pipelineParallelSize:
               fieldParams:
+                defaultValue: 1
                 label: Pipeline Parallel Size
               path: spec.components.llmEngine.parameters.pipelineParallelSize
               uiType: number
@@ -209,6 +249,7 @@ spec:
                 min: 0
             tensorParallelSize:
               fieldParams:
+                defaultValue: 1
                 label: Tensor Parallel Size
               path: spec.components.llmEngine.parameters.tensorParallelSize
               uiType: number
@@ -223,6 +264,7 @@ spec:
         - runtime
         - routing
         - disaggregation
+        - advanced
     predictor:
       sections:
         basicInfo:

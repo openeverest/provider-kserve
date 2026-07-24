@@ -1,0 +1,75 @@
+# Example Instance CR for the provider-kserve provider (llm topology, CPU).
+#
+# Serves a small Large Language Model with vLLM on CPU-only nodes (no GPU),
+# demonstrating:
+#   - computeProfile: cpu           (composes the CPU-only vLLM config)
+#   - kvCacheSpaceGi                (explicit CPU KV cache sizing)
+#   - Advanced inline config        (extra vLLM args via a per-Instance
+#                                    LLMInferenceServiceConfig, merged via baseRefs)
+#
+# Prerequisites:
+#   1. OpenEverest CRDs installed
+#   2. Provider CR applied (definition/provider.yaml)
+#   3. KServe installed with the LLMInferenceService (v1alpha2) CRD
+#   4. Provider controller running
+#   5. The chart installed with llmPresets.enabled=true (the CPU profile layers
+#      onto the bundled presets)
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: qwen-0-5b-cpu
+  namespace: default
+spec:
+  providerRef:
+    name: provider-kserve
+
+  topology:
+    type: llm
+    parameters:
+      enableGatewayRouting: false
+      enablePrefill: false
+
+  components:
+    llmEngine:
+      type: vllm
+      replicas: 1
+      # For CPU, size memory generously: vLLM's CPU runtime (torch import +
+      # compilation) has a multi-GiB floor *before* the model and KV cache, so a
+      # tight limit fails vLLM's startup memory check. The provider mirrors these
+      # limits into requests (Guaranteed QoS) so the scheduler reserves the RAM.
+      resources:
+        limits:
+          cpu: "4"
+          memory: 16Gi
+      parameters:
+        # A small, ungated model that runs comfortably on CPU.
+        modelURI: hf://Qwen/Qwen2.5-0.5B-Instruct
+        modelName: qwen2.5-0.5b-instruct
+
+        # Run without a GPU (composes the CPU-only LLMInferenceServiceConfig).
+        computeProfile: cpu
+
+        # CPU KV cache size (GiB). Leave unset (recommended) so vLLM auto-sizes
+        # the KV cache from the memory that is free at startup — this adapts to
+        # the node. Only set it to cap the KV cache to a specific size, and keep
+        # it small: vLLM refuses to start if it exceeds host-free memory.
+        # kvCacheSpaceGi: 1
+
+        # Advanced: extra runtime settings not exposed as first-class fields.
+        # The provider materializes this as an Instance-owned
+        # LLMInferenceServiceConfig and attaches it last via baseRefs. Enter only
+        # the config spec body.
+        #
+        # The CPU profile ALREADY applies sensible defaults via the chart
+        # (cpuProfile.defaultArgs): --gpu-memory-utilization=0.3, --enforce-eager,
+        # --max-model-len=2048. Setting `args` here REPLACES that whole list
+        # (KServe treats container args as atomic), so re-specify any you want to
+        # keep. This block is optional — omit it to just use the defaults.
+        config: |
+          template:
+            containers:
+              - name: main
+                args:
+                  - --gpu-memory-utilization=0.3
+                  - --enforce-eager
+                  - --max-model-len=4096
