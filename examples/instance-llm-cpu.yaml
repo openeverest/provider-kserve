@@ -33,6 +33,11 @@ spec:
     llmEngine:
       type: vllm
       replicas: 1
+      # Publish the model on an external address. In k3d/k3s the bundled
+      # servicelb assigns a LoadBalancer IP; in the cloud you get a real LB.
+      # Switch to ClusterIP to keep it in-cluster (reach it via port-forward).
+      service:
+        serviceType: LoadBalancer
       # For CPU, size memory generously: vLLM's CPU runtime (torch import +
       # compilation) has a multi-GiB floor *before* the model and KV cache, so a
       # tight limit fails vLLM's startup memory check. The provider mirrors these

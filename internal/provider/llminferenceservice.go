@@ -7,12 +7,14 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"knative.dev/pkg/apis"
 	"sigs.k8s.io/yaml"
 
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
 
+	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-kserve/definition/components"
@@ -42,7 +44,32 @@ const (
 	// provider only sets it when the user explicitly overrides it
 	// (kvCacheSpaceGi), leaving the adaptive default otherwise.
 	cpuKVCacheEnvVar = "VLLM_CPU_KVCACHE_SPACE"
+
+	// externalServiceSuffix names the extra Service the provider creates to
+	// publish the model externally when the user selects LoadBalancer or NodePort
+	// (KServe's own workload Service is always ClusterIP and provider-unowned).
+	externalServiceSuffix = "-external"
+
+	// vllmServingPort is the port the vLLM OpenAI-compatible API listens on and
+	// the port KServe's workload Service targets.
+	vllmServingPort = 8000
 )
+
+// workloadPodSelector returns the label selector KServe stamps on an
+// LLMInferenceService's model pods, so a provider-owned Service can front them.
+// Keep in sync with KServe's GetWorkloadLabelSelector.
+func workloadPodSelector(instance string) map[string]string {
+	return map[string]string{
+		"app.kubernetes.io/name":    instance,
+		"app.kubernetes.io/part-of": "llminferenceservice",
+		"kserve.io/component":       "workload",
+	}
+}
+
+// externalServiceName is the name of the provider-owned external Service.
+func externalServiceName(instance string) string {
+	return instance + externalServiceSuffix
+}
 
 // validateLLM checks the Instance spec for the llm topology.
 func validateLLM(c *controller.Context) error {
@@ -65,6 +92,13 @@ func validateLLM(c *controller.Context) error {
 	if strings.TrimSpace(params.Config) != "" {
 		if _, err := parseLLMConfigSpec(params.Config); err != nil {
 			return err
+		}
+	}
+	if comp.Service != nil {
+		switch comp.Service.ServiceType {
+		case "", corev1.ServiceTypeClusterIP, corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeNodePort:
+		default:
+			return fmt.Errorf("%s.service.serviceType must be one of ClusterIP, LoadBalancer or NodePort", common.ComponentLlmEngine)
 		}
 	}
 	return nil
@@ -249,7 +283,71 @@ func (p *Provider) syncLLM(c *controller.Context) error {
 	if err != nil {
 		return err
 	}
-	return common.Apply(c.Context(), c.Client(), c.Instance(), llmisvc)
+	if err := common.Apply(c.Context(), c.Client(), c.Instance(), llmisvc); err != nil {
+		return err
+	}
+
+	// Publish the model externally when requested (LoadBalancer/NodePort). This
+	// is a provider-owned Service fronting the KServe workload pods; ClusterIP
+	// needs none (KServe's own workload Service already covers in-cluster).
+	return ensureExternalService(c)
+}
+
+// ensureExternalService reconciles the provider-owned external Service for the
+// llm workload. It creates a LoadBalancer/NodePort Service selecting the KServe
+// workload pods when the user picks that expose type, and deletes any stale one
+// when the expose type is ClusterIP (the default) so switching back cleans up.
+func ensureExternalService(c *controller.Context) error {
+	comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
+
+	svcType := corev1.ServiceTypeClusterIP
+	if comp.Service != nil && comp.Service.ServiceType != "" {
+		svcType = comp.Service.ServiceType
+	}
+
+	if svcType == corev1.ServiceTypeClusterIP {
+		// No external Service needed; remove a previously created one if the
+		// user switched away from LoadBalancer/NodePort.
+		stale := &corev1.Service{ObjectMeta: c.ObjectMeta(externalServiceName(c.Name()))}
+		return c.Delete(stale)
+	}
+
+	svc := buildExternalService(c, comp.Service, svcType)
+	return common.Apply(c.Context(), c.Client(), c.Instance(), svc)
+}
+
+// buildExternalService builds the LoadBalancer/NodePort Service that fronts the
+// KServe workload pods on the vLLM serving port.
+func buildExternalService(c *controller.Context, spec *corev1alpha1.Service, svcType corev1.ServiceType) *corev1.Service {
+	meta := c.ObjectMeta(externalServiceName(c.Name()))
+	if spec != nil && len(spec.Annotations) > 0 {
+		if meta.Annotations == nil {
+			meta.Annotations = map[string]string{}
+		}
+		for k, v := range spec.Annotations {
+			meta.Annotations[k] = v
+		}
+	}
+
+	svc := &corev1.Service{
+		ObjectMeta: meta,
+		Spec: corev1.ServiceSpec{
+			Type:     svcType,
+			Selector: workloadPodSelector(c.Name()),
+			Ports: []corev1.ServicePort{{
+				Name:       "http",
+				Protocol:   corev1.ProtocolTCP,
+				Port:       vllmServingPort,
+				TargetPort: intstr.FromInt(vllmServingPort),
+			}},
+		},
+	}
+
+	if svcType == corev1.ServiceTypeLoadBalancer && spec != nil && spec.LoadBalancerService != nil {
+		svc.Spec.LoadBalancerSourceRanges = spec.LoadBalancerService.SourceRanges.NormalizedSourceRanges()
+	}
+
+	return svc
 }
 
 // ensureLLMConfig materializes the inline Advanced config
@@ -328,11 +426,16 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 
 	ready := llmisvc.Status.GetCondition(apis.ConditionReady)
 	if ready != nil && ready.IsTrue() {
-		// A Ready service without gateway routing exposes only the in-cluster
-		// Service and KServe leaves Status.URL empty, so surface Ready with
-		// connection details only when a URL is actually published.
-		if llmisvc.Status.URL != nil {
-			return controller.ReadyWithConnectionDetails(connectionDetails(llmisvc.Status.URL)), nil
+		// Surface connection details derived from however the model is exposed
+		// (gateway URL, external Service, or the in-cluster workload Service).
+		// While an external address is still settling (e.g. a LoadBalancer with
+		// no ingress IP yet), report Ready without details rather than blocking.
+		details, err := p.llmConnectionDetails(c, llmisvc)
+		if err != nil {
+			return controller.Provisioning(err.Error()), nil
+		}
+		if details != nil {
+			return controller.ReadyWithConnectionDetails(*details), nil
 		}
 		return controller.Ready(), nil
 	}
@@ -343,4 +446,122 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 	// model), so surface it as Provisioning and let the condition message
 	// explain the current state rather than flipping the Instance to Failed.
 	return controller.Provisioning(conditionMessage(ready, "LLMInferenceService is being created")), nil
+}
+
+// llmConnectionDetails resolves how to reach a Ready model based on its expose
+// type. It returns nil (Ready without details) when an external address is
+// requested but not yet available, so the Instance does not stall waiting on a
+// pending LoadBalancer.
+func (p *Provider) llmConnectionDetails(c *controller.Context, llmisvc *kservev1alpha2.LLMInferenceService) (*controller.ConnectionDetails, error) {
+	// Gateway API routing publishes an external URL directly on the status.
+	if llmisvc.Status.URL != nil {
+		d := connectionDetails(llmisvc.Status.URL)
+		return &d, nil
+	}
+
+	comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
+	svcType := corev1.ServiceTypeClusterIP
+	if comp.Service != nil && comp.Service.ServiceType != "" {
+		svcType = comp.Service.ServiceType
+	}
+
+	switch svcType {
+	case corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeNodePort:
+		return p.externalServiceConnectionDetails(c, svcType)
+	default:
+		// ClusterIP: reachable in-cluster via the KServe workload Service DNS.
+		host := workloadServiceHost(c, llmisvc)
+		d := kserveConnectionDetails(host, strconv.Itoa(vllmServingPort))
+		return &d, nil
+	}
+}
+
+// externalServiceConnectionDetails derives the endpoint of the provider-owned
+// external Service. Returns nil when the address is not yet assigned.
+func (p *Provider) externalServiceConnectionDetails(c *controller.Context, svcType corev1.ServiceType) (*controller.ConnectionDetails, error) {
+	svc := &corev1.Service{}
+	if err := c.Get(svc, externalServiceName(c.Name())); err != nil {
+		return nil, nil
+	}
+
+	if svcType == corev1.ServiceTypeLoadBalancer {
+		for _, ing := range svc.Status.LoadBalancer.Ingress {
+			host := ing.IP
+			if host == "" {
+				host = ing.Hostname
+			}
+			if host != "" {
+				d := kserveConnectionDetails(host, strconv.Itoa(vllmServingPort))
+				return &d, nil
+			}
+		}
+		// LoadBalancer provisioning still in progress.
+		return nil, nil
+	}
+
+	// NodePort: pair a reachable node address with the allocated node port.
+	var nodePort int32
+	for _, p := range svc.Spec.Ports {
+		if p.NodePort != 0 {
+			nodePort = p.NodePort
+			break
+		}
+	}
+	if nodePort == 0 {
+		return nil, nil
+	}
+	host := firstNodeAddress(c)
+	if host == "" {
+		return nil, nil
+	}
+	d := kserveConnectionDetails(host, strconv.Itoa(int(nodePort)))
+	return &d, nil
+}
+
+// workloadServiceHost returns the in-cluster DNS name of the KServe workload
+// Service. It prefers the name KServe records in status, falling back to the
+// well-known naming pattern before the status is populated.
+func workloadServiceHost(c *controller.Context, llmisvc *kservev1alpha2.LLMInferenceService) string {
+	name := c.Name() + "-kserve-workload-svc"
+	if ws := llmisvc.Status.Workloads; ws != nil && ws.Service != nil && ws.Service.Name != "" {
+		name = ws.Service.Name
+	}
+	return fmt.Sprintf("%s.%s.svc.cluster.local", name, c.Namespace())
+}
+
+// firstNodeAddress returns an address for reaching a NodePort Service, preferring
+// an external (routable) address and falling back to the internal one. Returns
+// empty when nodes cannot be listed or have no usable address.
+func firstNodeAddress(c *controller.Context) string {
+	nodes := &corev1.NodeList{}
+	if err := c.List(nodes); err != nil {
+		return ""
+	}
+	var internal string
+	for _, node := range nodes.Items {
+		for _, addr := range node.Status.Addresses {
+			switch addr.Type {
+			case corev1.NodeExternalIP:
+				if addr.Address != "" {
+					return addr.Address
+				}
+			case corev1.NodeInternalIP:
+				if internal == "" {
+					internal = addr.Address
+				}
+			}
+		}
+	}
+	return internal
+}
+
+// kserveConnectionDetails builds ConnectionDetails for the vLLM HTTP endpoint.
+func kserveConnectionDetails(host, port string) controller.ConnectionDetails {
+	return controller.ConnectionDetails{
+		Type:     "kserve",
+		Provider: common.ProviderName,
+		Host:     host,
+		Port:     port,
+		URI:      fmt.Sprintf("http://%s:%s", host, port),
+	}
 }

@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -34,6 +35,7 @@ func New() *Provider {
 				controller.WatchOwned(&kservev1alpha2.LLMInferenceService{}),
 				controller.WatchOwned(&kservev1alpha2.LLMInferenceServiceConfig{}),
 				controller.WatchOwned(&kservev1beta1.InferenceService{}),
+				controller.WatchOwned(&corev1.Service{}),
 			},
 		},
 	}

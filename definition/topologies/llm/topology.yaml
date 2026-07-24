@@ -156,10 +156,30 @@ ui:
       - computeProfile
       - resources
       - kvCacheSpaceGi
-    routing:
-      label: Routing
-      description: Expose the model through the Gateway API Inference Extension for prefix-cache aware routing.
+    exposure:
+      label: Exposure
+      description: >-
+        Configure how clients reach the model. Choose the Service type for
+        external access; ClusterIP keeps it in-cluster only (reach it via
+        port-forward or another pod), while LoadBalancer and NodePort publish an
+        external address (the provider creates an extra Service selecting the
+        model pods, which listen on port 8000, and reports the endpoint in the
+        connection details). Optionally enable the Gateway API Inference
+        Extension for prefix-cache aware routing across replicas.
       components:
+        serviceType:
+          uiType: select
+          path: spec.components.llmEngine.service.serviceType
+          fieldParams:
+            label: External access
+            defaultValue: ClusterIP
+            options:
+            - label: ClusterIP (in-cluster only)
+              value: ClusterIP
+            - label: LoadBalancer
+              value: LoadBalancer
+            - label: NodePort
+              value: NodePort
         enableGatewayRouting:
           uiType: switch
           path: spec.topology.parameters.enableGatewayRouting
@@ -215,6 +235,6 @@ ui:
   - basicInfo
   - scaling
   - runtime
-  - routing
+  - exposure
   - disaggregation
   - advanced

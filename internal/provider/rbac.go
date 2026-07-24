@@ -34,7 +34,11 @@ package provider
 // require write verbs in addition to read.
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch
+// The provider creates an external Service (LoadBalancer/NodePort) fronting the
+// llm workload when the user selects that expose type, so services need write
+// verbs; nodes are read to resolve a NodePort's reachable address.
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 // ServiceAccounts carry the HuggingFace token Secret for gated model downloads
 // (attached to the llm workload so KServe injects HF_TOKEN).
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete

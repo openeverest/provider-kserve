@@ -163,7 +163,7 @@ spec:
                 min: 0
           description: Split prefill and decode into independently scaled deployments (llm-d pattern).
           label: Disaggregated Serving
-        routing:
+        exposure:
           components:
             enableGatewayRouting:
               fieldParams:
@@ -171,8 +171,21 @@ spec:
                 label: Enable Gateway API Routing
               path: spec.topology.parameters.enableGatewayRouting
               uiType: switch
-          description: Expose the model through the Gateway API Inference Extension for prefix-cache aware routing.
-          label: Routing
+            serviceType:
+              fieldParams:
+                defaultValue: ClusterIP
+                label: External access
+                options:
+                  - label: ClusterIP (in-cluster only)
+                    value: ClusterIP
+                  - label: LoadBalancer
+                    value: LoadBalancer
+                  - label: NodePort
+                    value: NodePort
+              path: spec.components.llmEngine.service.serviceType
+              uiType: select
+          description: Configure how clients reach the model. Choose the Service type for external access; ClusterIP keeps it in-cluster only (reach it via port-forward or another pod), while LoadBalancer and NodePort publish an external address (the provider creates an extra Service selecting the model pods, which listen on port 8000, and reports the endpoint in the connection details). Optionally enable the Gateway API Inference Extension for prefix-cache aware routing across replicas.
+          label: Exposure
         runtime:
           components:
             computeProfile:
@@ -262,7 +275,7 @@ spec:
         - basicInfo
         - scaling
         - runtime
-        - routing
+        - exposure
         - disaggregation
         - advanced
     predictor:

@@ -52,6 +52,37 @@ Deployments + HPA, no Knative dependency).
 | `enablePrefill`        | bool  | Enable disaggregated serving with a separate prefill workload. |
 | `prefillReplicas`      | int32 | Replicas for the prefill workload (when `enablePrefill` is true). |
 
+## Accessing the model
+
+vLLM serves an OpenAI-compatible API on **port 8000**. In RawDeployment mode
+KServe only creates an in-cluster `ClusterIP` Service, so how you reach the model
+depends on the **External access** setting
+(`spec.components.llmEngine.service.serviceType`):
+
+| `serviceType`  | What the provider does | How to connect |
+|----------------|------------------------|----------------|
+| `ClusterIP` (default) | Nothing extra — uses KServe's in-cluster Service | Port-forward, or call it from another pod at the reported host |
+| `LoadBalancer` | Creates an owned Service of type `LoadBalancer` fronting the model pods | `curl http://<lb-address>:8000/v1/models` |
+| `NodePort`     | Creates an owned Service of type `NodePort` | `curl http://<node-ip>:<nodePort>/v1/models` |
+
+For `LoadBalancer`/`NodePort` the endpoint is published in the Instance's
+connection details once the address is assigned (a `LoadBalancer` reports Ready
+without an address while the cloud/k3d LB is still provisioning). `LoadBalancer`
+also honors `service.annotations` (e.g. cloud LB tuning) and
+`service.loadBalancerService.sourceRanges` (allowed CIDRs).
+
+To reach a `ClusterIP` model from your laptop, port-forward the KServe workload
+Service:
+
+```bash
+kubectl port-forward svc/<instance>-kserve-workload-svc 8000:8000
+curl http://localhost:8000/v1/models
+```
+
+> This is plain Kubernetes exposure. The KServe-native Gateway API path
+> (`enableGatewayRouting`) is separate and additionally provisions a managed
+> `Gateway` + `HTTPRoute` and the Inference Gateway scheduler.
+
 ## Model catalog
 
 The models offered in the `llm` topology's **Model** dropdown are **not**

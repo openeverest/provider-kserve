@@ -40,6 +40,18 @@ spec:
       type: vllm
       # Number of decode replicas.
       replicas: 1
+      # How the model is exposed. ClusterIP (default) keeps it in-cluster only;
+      # LoadBalancer/NodePort make the provider create an extra Service fronting
+      # the model pods (vLLM listens on port 8000) and publish its address in the
+      # connection details. Annotations and loadBalancerService.sourceRanges are
+      # honored for cloud LoadBalancers.
+      service:
+        serviceType: ClusterIP
+        # annotations:
+        #   service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+        # loadBalancerService:
+        #   sourceRanges:
+        #     - 10.0.0.0/8
       resources:
         requests:
           cpu: "4"

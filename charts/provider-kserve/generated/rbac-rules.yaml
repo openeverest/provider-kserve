@@ -4,7 +4,7 @@
     - ""
   resources:
     - configmaps
-    - services
+    - nodes
   verbs:
     - get
     - list
@@ -21,6 +21,7 @@
   resources:
     - secrets
     - serviceaccounts
+    - services
   verbs:
     - create
     - delete
