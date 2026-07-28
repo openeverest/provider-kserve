@@ -73,11 +73,16 @@ spec:
       parametersSchema:
         openAPIV3Schema:
           properties:
+            enableAIGateway:
+              type: boolean
             enableGatewayRouting:
               type: boolean
             enablePrefill:
               type: boolean
             prefillReplicas:
+              format: int32
+              type: integer
+            tokenLimitPerHour:
               format: int32
               type: integer
           type: object
@@ -165,6 +170,11 @@ spec:
           label: Disaggregated Serving
         exposure:
           components:
+            enableAIGateway:
+              fieldParams:
+                label: Enable Envoy AI Gateway
+              path: spec.topology.parameters.enableAIGateway
+              uiType: switch
             enableGatewayRouting:
               fieldParams:
                 defaultValue: false
@@ -184,8 +194,16 @@ spec:
                     value: NodePort
               path: spec.components.llmEngine.service.serviceType
               uiType: select
-          description: Configure how clients reach the model. Choose the Service type for external access; ClusterIP keeps it in-cluster only (reach it via port-forward or another pod), while LoadBalancer and NodePort publish an external address (the provider creates an extra Service selecting the model pods, which listen on port 8000, and reports the endpoint in the connection details). Optionally enable the Gateway API Inference Extension for prefix-cache aware routing across replicas.
-          label: Exposure
+            tokenLimitPerHour:
+              fieldParams:
+                defaultValue: 10000
+                label: Tokens per User per Hour
+              path: spec.topology.parameters.tokenLimitPerHour
+              uiType: number
+              validation:
+                min: 1
+          description: Configure how clients reach the model. Choose the Service type for external access, or enable the Envoy AI Gateway for a shared entry point with token metering and per-user rate limiting.
+          label: Routing
         runtime:
           components:
             computeProfile:

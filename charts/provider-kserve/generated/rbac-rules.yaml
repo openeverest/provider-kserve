@@ -31,6 +31,24 @@
     - update
     - watch
 - apiGroups:
+    - aigateway.envoyproxy.io
+  resources:
+    - aigatewayroutes
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - aigateway.envoyproxy.io
+  resources:
+    - aigatewayroutes/status
+  verbs:
+    - get
+- apiGroups:
     - coordination.k8s.io
   resources:
     - leases
@@ -70,6 +88,27 @@
     - core.openeverest.io
   resources:
     - providers
+  verbs:
+    - get
+    - list
+    - watch
+- apiGroups:
+    - gateway.envoyproxy.io
+  resources:
+    - backendtrafficpolicies
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - gateway.networking.k8s.io
+  resources:
+    - gateways
+    - httproutes
   verbs:
     - get
     - list
