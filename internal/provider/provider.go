@@ -4,7 +4,9 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
@@ -24,6 +26,16 @@ type Provider struct {
 
 // New creates a new Provider instance.
 func New() *Provider {
+	watches := []controller.WatchConfig{
+		controller.WatchOwned(&kservev1alpha2.LLMInferenceService{}),
+		controller.WatchOwned(&kservev1alpha2.LLMInferenceServiceConfig{}),
+		controller.WatchOwned(&kservev1beta1.InferenceService{}),
+		controller.WatchOwned(&corev1.Service{}),
+	}
+	if common.AIGatewayEnabled() {
+		watches = append(watches, controller.WatchOwned(unstructuredObject(aiGatewayRouteGVK)))
+	}
+
 	return &Provider{
 		BaseProvider: controller.BaseProvider{
 			ProviderName: common.ProviderName,
@@ -31,14 +43,15 @@ func New() *Provider {
 				kservev1beta1.AddToScheme,
 				kservev1alpha2.AddToScheme,
 			},
-			WatchConfigs: []controller.WatchConfig{
-				controller.WatchOwned(&kservev1alpha2.LLMInferenceService{}),
-				controller.WatchOwned(&kservev1alpha2.LLMInferenceServiceConfig{}),
-				controller.WatchOwned(&kservev1beta1.InferenceService{}),
-				controller.WatchOwned(&corev1.Service{}),
-			},
+			WatchConfigs: watches,
 		},
 	}
+}
+
+func unstructuredObject(gvk schema.GroupVersionKind) *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(gvk)
+	return obj
 }
 
 // Validate checks if the Instance spec is valid.

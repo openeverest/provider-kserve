@@ -17,6 +17,16 @@ type LlmTopologyParameters struct {
 	// with its default networking.
 	EnableGatewayRouting bool `json:"enableGatewayRouting,omitempty"`
 
+	// EnableAIGateway exposes the model through the shared Envoy AI Gateway.
+	// It also enables gateway routing because Envoy routes to the
+	// LLMInferenceService's generated InferencePool.
+	EnableAIGateway bool `json:"enableAIGateway,omitempty"`
+
+	// TokenLimitPerHour is the per-user token quota for this model. It is used
+	// only when EnableAIGateway is true and the provider has a Redis-compatible
+	// rate-limit backend configured. Zero uses the default limit.
+	TokenLimitPerHour *int32 `json:"tokenLimitPerHour,omitempty"`
+
 	// EnablePrefill turns on disaggregated serving by creating a separate
 	// prefill deployment in addition to the decode workload (llm-d pattern).
 	EnablePrefill bool `json:"enablePrefill,omitempty"`

@@ -29,6 +29,13 @@ const (
 	// from .Values.huggingface.tokenSecretName) holding the Secret that provides
 	// the HuggingFace token for gated model downloads.
 	hfTokenSecretEnvVar = "HF_TOKEN_SECRET_NAME"
+
+	aiGatewayNameEnvVar      = "AI_GATEWAY_NAME"
+	aiGatewayNamespaceEnvVar = "AI_GATEWAY_NAMESPACE"
+	aiGatewayEnabledEnvVar   = "AI_GATEWAY_ENABLED"
+	aiGatewaySchemeEnvVar    = "AI_GATEWAY_SCHEME"
+	aiGatewayPortEnvVar      = "AI_GATEWAY_PORT"
+	rateLimitRedisURLEnvVar  = "AI_GATEWAY_RATE_LIMIT_REDIS_URL"
 )
 
 // HFTokenSecretName returns the configured HuggingFace token Secret name, or an
@@ -36,4 +43,43 @@ const (
 // HF_TOKEN key and live in the Instance's namespace.
 func HFTokenSecretName() string {
 	return os.Getenv(hfTokenSecretEnvVar)
+}
+
+// AIGatewayName returns the shared Gateway name configured by the chart.
+func AIGatewayName() string {
+	return os.Getenv(aiGatewayNameEnvVar)
+}
+
+// AIGatewayEnabled reports whether the optional gateway stack is configured.
+func AIGatewayEnabled() bool {
+	return os.Getenv(aiGatewayEnabledEnvVar) == "true"
+}
+
+// AIGatewayNamespace returns the namespace containing the shared Gateway.
+func AIGatewayNamespace() string {
+	return os.Getenv(aiGatewayNamespaceEnvVar)
+}
+
+// AIGatewayScheme returns the scheme used in published gateway URLs.
+func AIGatewayScheme() string {
+	if scheme := os.Getenv(aiGatewaySchemeEnvVar); scheme != "" {
+		return scheme
+	}
+	return "http"
+}
+
+// AIGatewayPort returns the externally exposed Gateway listener port.
+func AIGatewayPort() string {
+	if port := os.Getenv(aiGatewayPortEnvVar); port != "" {
+		return port
+	}
+	if AIGatewayScheme() == "https" {
+		return "443"
+	}
+	return "80"
+}
+
+// RateLimitRedisURL returns the Redis-compatible global rate-limit backend.
+func RateLimitRedisURL() string {
+	return os.Getenv(rateLimitRedisURLEnvVar)
 }
