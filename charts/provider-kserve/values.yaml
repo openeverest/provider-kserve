@@ -307,3 +307,72 @@ cpuProfile:
   # to the model server container, so sizing is finetuned per instance rather
   # than shared across all CPU instances.
 
+# ---------------------------------------------------------------------------
+# Optional Envoy AI Gateway.
+#
+# When enabled, the chart installs compatible Envoy Gateway and Envoy AI
+# Gateway controllers and creates one shared Gateway. Individual llm Instances
+# opt in with `spec.topology.parameters.enableAIGateway`.
+aiGateway:
+  # -- Install and configure the shared Envoy AI Gateway stack
+  enabled: false
+  # -- Scheme published in Instance connection details
+  scheme: http
+  listener:
+    # -- Gateway listener protocol
+    protocol: HTTP
+    # -- Gateway listener and public connection port
+    port: 80
+  gatewayService:
+    # -- Envoy proxy Service type (LoadBalancer, NodePort, or ClusterIP)
+    type: LoadBalancer
+
+# Envoy Gateway subchart configuration required by Envoy AI Gateway v0.4.
+envoy-gateway:
+  config:
+    envoyGateway:
+      gateway:
+        controllerName: gateway.envoyproxy.io/gatewayclass-controller
+      extensionApis:
+        enableEnvoyPatchPolicy: true
+        enableBackend: true
+      extensionManager:
+        backendResources:
+          - group: inference.networking.k8s.io
+            kind: InferencePool
+            version: v1
+        hooks:
+          xdsTranslator:
+            translation:
+              listener:
+                includeAll: true
+              route:
+                includeAll: true
+              cluster:
+                includeAll: true
+              secret:
+                includeAll: true
+            post:
+              - Translation
+              - Cluster
+              - Route
+        service:
+          fqdn:
+            hostname: ai-gateway-controller
+            port: 1063
+      # To enable per-user token quotas, add an existing Redis/Valkey endpoint:
+      # rateLimit:
+      #   backend:
+      #     type: Redis
+      #     redis:
+      #       url: valkey.default.svc.cluster.local:6379
+
+# Both optional controllers are installed into the provider release namespace.
+# This upstream value is supplemented by a release-namespace binding rendered
+# by this chart.
+envoy-ai-gateway:
+  envoyGateway:
+    namespace: default
+
+envoy-ai-gateway-crds: {}
+
