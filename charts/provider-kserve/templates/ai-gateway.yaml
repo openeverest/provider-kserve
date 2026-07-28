@@ -1,0 +1,64 @@
+{{- if .Values.aiGateway.enabled }}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: {{ include "provider-kserve.aiGatewayName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provider-kserve.labels" . | nindent 4 }}
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: {{ .Values.aiGateway.gatewayService.type }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: {{ include "provider-kserve.aiGatewayClassName" . }}
+  labels:
+    {{- include "provider-kserve.labels" . | nindent 4 }}
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ include "provider-kserve.aiGatewayName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provider-kserve.labels" . | nindent 4 }}
+spec:
+  gatewayClassName: {{ include "provider-kserve.aiGatewayClassName" . }}
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: {{ include "provider-kserve.aiGatewayName" . }}
+  listeners:
+    - name: {{ .Values.aiGateway.scheme }}
+      protocol: {{ .Values.aiGateway.listener.protocol }}
+      port: {{ .Values.aiGateway.listener.port }}
+      allowedRoutes:
+        namespaces:
+          from: All
+---
+# The upstream AI Gateway chart defaults this binding to
+# envoy-gateway-system. Dependencies share this release namespace, so add the
+# equivalent binding for the bundled Envoy Gateway controller.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "provider-kserve.aiGatewayReaderBindingName" . }}
+  labels:
+    {{- include "provider-kserve.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: envoy-ai-gateway-inference-pool-reader
+subjects:
+  - kind: ServiceAccount
+    name: envoy-gateway
+    namespace: {{ .Release.Namespace }}
+{{- end }}
