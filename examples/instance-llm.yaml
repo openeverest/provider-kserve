@@ -30,6 +30,12 @@ spec:
       # Expose the model through the Gateway API Inference Extension for
       # prefix-cache aware routing across replicas.
       enableGatewayRouting: false
+      # Expose the OpenAI API through the shared Envoy AI Gateway. The provider
+      # automatically enables Gateway API routing when this is true.
+      enableAIGateway: false
+      # Per-user, per-model quota when the provider chart has a Redis/Valkey
+      # rate-limit backend configured.
+      # tokenLimitPerHour: 1000
       # Disaggregated prefill/decode (llm-d pattern). Requires enough GPUs.
       enablePrefill: false
       # prefillReplicas: 1

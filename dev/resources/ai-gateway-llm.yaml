@@ -1,0 +1,43 @@
+# Small CPU-only LLM for exercising the Envoy AI Gateway in the local Tilt
+# cluster. Tilt replaces __NAMESPACE__ and applies this file when
+# ENABLE_AI_GATEWAY=true.
+#
+# Once Ready:
+#   export GATEWAY_URL="http://$(kubectl get gateway \
+#     provider-kserve-ai-gateway -n __NAMESPACE__ \
+#     -o jsonpath='{.status.addresses[0].value}')"
+#
+#   curl "$GATEWAY_URL/v1/chat/completions" \
+#     -H 'Content-Type: application/json' \
+#     -H 'x-user-id: tilt-user' \
+#     -d '{"model":"smollm2-135m-instruct","messages":[{"role":"user","content":"Say hello in one sentence."}]}'
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: ai-gateway-smollm
+  namespace: __NAMESPACE__
+spec:
+  providerRef:
+    name: provider-kserve
+  topology:
+    type: llm
+    parameters:
+      enableAIGateway: true
+      # Enforced only when envoyGateway.config.envoyGateway.rateLimit is also
+      # configured with a Redis/Valkey URL.
+      tokenLimitPerHour: 1000
+  components:
+    llmEngine:
+      type: vllm
+      replicas: 1
+      resources:
+        requests:
+          cpu: "2"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      parameters:
+        modelURI: hf://HuggingFaceTB/SmolLM2-135M-Instruct
+        modelName: smollm2-135m-instruct
+        computeProfile: cpu

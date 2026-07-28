@@ -156,16 +156,12 @@ ui:
       - computeProfile
       - resources
       - kvCacheSpaceGi
-    exposure:
-      label: Exposure
+    routing:
+      label: Routing
       description: >-
         Configure how clients reach the model. Choose the Service type for
-        external access; ClusterIP keeps it in-cluster only (reach it via
-        port-forward or another pod), while LoadBalancer and NodePort publish an
-        external address (the provider creates an extra Service selecting the
-        model pods, which listen on port 8000, and reports the endpoint in the
-        connection details). Optionally enable the Gateway API Inference
-        Extension for prefix-cache aware routing across replicas.
+        external access, or enable the Envoy AI Gateway for a shared entry
+        point with token metering and per-user rate limiting.
       components:
         serviceType:
           uiType: select
@@ -186,6 +182,19 @@ ui:
           fieldParams:
             label: Enable Gateway API Routing
             defaultValue: false
+        enableAIGateway:
+          uiType: switch
+          path: spec.topology.parameters.enableAIGateway
+          fieldParams:
+            label: Enable Envoy AI Gateway
+        tokenLimitPerHour:
+          uiType: number
+          path: spec.topology.parameters.tokenLimitPerHour
+          fieldParams:
+            label: Tokens per User per Hour
+            defaultValue: 1000
+          validation:
+            min: 1
     disaggregation:
       label: Disaggregated Serving
       description: Split prefill and decode into independently scaled deployments (llm-d pattern).
@@ -235,6 +244,6 @@ ui:
   - basicInfo
   - scaling
   - runtime
-  - exposure
+  - routing
   - disaggregation
   - advanced
