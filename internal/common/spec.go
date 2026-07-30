@@ -35,6 +35,7 @@ const (
 	aiGatewayEnabledEnvVar   = "AI_GATEWAY_ENABLED"
 	aiGatewaySchemeEnvVar    = "AI_GATEWAY_SCHEME"
 	aiGatewayPortEnvVar      = "AI_GATEWAY_PORT"
+	aiGatewayHostnameEnvVar  = "AI_GATEWAY_HOSTNAME"
 	rateLimitRedisURLEnvVar  = "AI_GATEWAY_RATE_LIMIT_REDIS_URL"
 )
 
@@ -77,6 +78,11 @@ func AIGatewayPort() string {
 		return "443"
 	}
 	return "80"
+}
+
+// AIGatewayHostname returns the public DNS name configured for Gateway TLS.
+func AIGatewayHostname() string {
+	return os.Getenv(aiGatewayHostnameEnvVar)
 }
 
 // RateLimitRedisURL returns the Redis-compatible global rate-limit backend.
