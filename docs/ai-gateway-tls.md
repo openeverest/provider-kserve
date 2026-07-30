@@ -26,13 +26,28 @@ is required.
 
 The cloud request flow is:
 
-```text
-Client HTTPS :443
-  -> cloud LoadBalancer
-  -> Envoy Gateway (TLS termination and AI processing)
-  -> AIGatewayRoute
-  -> InferencePool endpoint picker
-  -> vLLM GPU workload
+```mermaid
+flowchart TD
+    client["External Client<br/>curl $GATEWAY_URL/v1/..."]
+    lb["LoadBalancer<br/>External IP<br/>:80 HTTP or :443 HTTPS"]
+    gateway["Envoy Gateway — single LoadBalancer<br/>provider-kserve-ai-gateway<br/><br/>Routes by x-ai-eg-model<br/>Token metering per model<br/>Per-user rate limiting with x-user-id"]
+
+    routeA["AIGatewayRoute A<br/>model: smollm"]
+    routeB["AIGatewayRoute B<br/>model: llama-8b"]
+    routeC["AIGatewayRoute C<br/>model: mixtral"]
+
+    poolA["InferencePool A<br/>vLLM pods"]
+    poolB["InferencePool B<br/>vLLM pods"]
+    poolC["InferencePool C<br/>vLLM pods"]
+
+    client --> lb
+    lb --> gateway
+    gateway --> routeA
+    gateway --> routeB
+    gateway --> routeC
+    routeA --> poolA
+    routeB --> poolB
+    routeC --> poolC
 ```
 
 ## DNS-01 certificates
