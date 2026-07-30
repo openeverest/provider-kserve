@@ -62,9 +62,11 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: AI_GATEWAY_SCHEME
-              value: {{ .Values.aiGateway.scheme | quote }}
+              value: {{ include "provider-kserve.aiGatewayScheme" . | quote }}
             - name: AI_GATEWAY_PORT
-              value: {{ .Values.aiGateway.listener.port | quote }}
+              value: {{ include "provider-kserve.aiGatewayPort" . | quote }}
+            - name: AI_GATEWAY_HOSTNAME
+              value: {{ ternary .Values.aiGateway.tls.hostname "" .Values.aiGateway.tls.enabled | quote }}
             - name: AI_GATEWAY_RATE_LIMIT_REDIS_URL
               value: {{ dig "rateLimit" "backend" "redis" "url" "" (index .Values "envoy-gateway").config.envoyGateway | quote }}
             {{- with .Values.extraEnv }}

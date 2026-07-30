@@ -152,12 +152,24 @@ func TestBuildTokenRateLimitPolicy(t *testing.T) {
 func TestGatewayConnectionDetails(t *testing.T) {
 	t.Setenv("AI_GATEWAY_SCHEME", "https")
 	t.Setenv("AI_GATEWAY_PORT", "8443")
+	t.Setenv("AI_GATEWAY_HOSTNAME", "llm.example.com")
 
 	details := gatewayConnectionDetails("gateway.example.com")
-	if details.Host != "gateway.example.com" || details.Port != "8443" {
+	if details.Host != "llm.example.com" || details.Port != "8443" {
 		t.Fatalf("connection address = %s:%s", details.Host, details.Port)
 	}
-	if details.URI != "https://gateway.example.com:8443" {
-		t.Fatalf("connection URI = %q, want https://gateway.example.com:8443", details.URI)
+	if details.URI != "https://llm.example.com:8443" {
+		t.Fatalf("connection URI = %q, want https://llm.example.com:8443", details.URI)
+	}
+}
+
+func TestGatewayConnectionDetailsUsesGatewayAddressWithoutConfiguredHostname(t *testing.T) {
+	t.Setenv("AI_GATEWAY_SCHEME", "http")
+	t.Setenv("AI_GATEWAY_PORT", "80")
+	t.Setenv("AI_GATEWAY_HOSTNAME", "")
+
+	details := gatewayConnectionDetails("gateway.example.com")
+	if details.Host != "gateway.example.com" || details.URI != "http://gateway.example.com" {
+		t.Fatalf("connection details = %#v", details)
 	}
 }
