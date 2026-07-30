@@ -100,6 +100,11 @@ aiGateway:
   enabled: true
 ```
 
+TLS is optional and exposes the shared Gateway over HTTPS on port 443 using a
+cert-manager `Issuer` or `ClusterIssuer`. See the
+[Envoy AI Gateway TLS guide](docs/ai-gateway-tls.md) for DNS-01 production
+setup, Let's Encrypt staging, cloud DNS providers, and local self-signed tests.
+
 Then enable it on an Instance:
 
 ```yaml
@@ -149,8 +154,8 @@ envoyGateway:
 When the URL is omitted, no `BackendTrafficPolicy` is created. When configured,
 the quota is keyed by both `x-user-id` and model, request cost is zero, and the
 response's `llm_total_token` metadata is charged. Exhausted quotas return HTTP
-429. The initial HTTP setup does not add API-key authentication or backend TLS;
-secure the external Gateway before exposing it to untrusted networks.
+429. Gateway TLS does not add API-key authentication or backend TLS; configure
+those separately before exposing the endpoint to untrusted networks.
 
 ## Model catalog
 
