@@ -1,4 +1,22 @@
 {{- if .Values.aiGateway.enabled }}
+{{- if .Values.aiGateway.tls.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "provider-kserve.aiGatewayName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provider-kserve.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "provider-kserve.aiGatewayTLSSecretName" . }}
+  dnsNames:
+    - {{ required "aiGateway.tls.hostname is required when AI Gateway TLS is enabled" .Values.aiGateway.tls.hostname | quote }}
+  issuerRef:
+    name: {{ required "aiGateway.tls.issuerRef.name is required when AI Gateway TLS is enabled" .Values.aiGateway.tls.issuerRef.name | quote }}
+    kind: {{ default "ClusterIssuer" .Values.aiGateway.tls.issuerRef.kind }}
+    group: {{ default "cert-manager.io" .Values.aiGateway.tls.issuerRef.group }}
+---
+{{ end }}
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyProxy
 metadata:
@@ -37,12 +55,28 @@ spec:
       kind: EnvoyProxy
       name: {{ include "provider-kserve.aiGatewayName" . }}
   listeners:
+    {{- if .Values.aiGateway.tls.enabled }}
+    - name: https
+      hostname: {{ required "aiGateway.tls.hostname is required when AI Gateway TLS is enabled" .Values.aiGateway.tls.hostname | quote }}
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: {{ include "provider-kserve.aiGatewayTLSSecretName" . }}
+      allowedRoutes:
+        namespaces:
+          from: All
+    {{- else }}
     - name: {{ .Values.aiGateway.scheme }}
       protocol: {{ .Values.aiGateway.listener.protocol }}
       port: {{ .Values.aiGateway.listener.port }}
       allowedRoutes:
         namespaces:
           from: All
+    {{- end }}
 ---
 # The upstream AI Gateway chart defaults this binding to
 # envoy-gateway-system. Dependencies share this release namespace, so add the

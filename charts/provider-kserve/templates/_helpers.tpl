@@ -83,3 +83,15 @@ Names for the optional shared Envoy AI Gateway resources.
 {{- define "provider-kserve.aiGatewayReaderBindingName" -}}
 {{- printf "%s-ai-gateway-pool-reader" (include "provider-kserve.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
+
+{{- define "provider-kserve.aiGatewayTLSSecretName" -}}
+{{- default (printf "%s-tls" (include "provider-kserve.aiGatewayName" .)) .Values.aiGateway.tls.secretName | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "provider-kserve.aiGatewayScheme" -}}
+{{- if .Values.aiGateway.tls.enabled }}https{{ else }}{{ .Values.aiGateway.scheme }}{{ end }}
+{{- end }}
+
+{{- define "provider-kserve.aiGatewayPort" -}}
+{{- if .Values.aiGateway.tls.enabled }}443{{ else }}{{ .Values.aiGateway.listener.port }}{{ end }}
+{{- end }}

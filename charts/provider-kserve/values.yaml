@@ -323,6 +323,18 @@ aiGateway:
     protocol: HTTP
     # -- Gateway listener and public connection port
     port: 80
+  tls:
+    # -- Issue a public certificate and expose the Gateway over HTTPS on port 443
+    enabled: false
+    # -- DNS name clients use for the Gateway, for example llm.example.com
+    hostname: ""
+    # -- Secret populated by cert-manager; empty uses <gateway-name>-tls
+    secretName: ""
+    # -- Existing cert-manager Issuer or ClusterIssuer
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
+      group: cert-manager.io
   gatewayService:
     # -- Envoy proxy Service type (LoadBalancer, NodePort, or ClusterIP)
     type: LoadBalancer

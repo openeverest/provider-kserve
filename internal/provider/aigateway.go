@@ -263,6 +263,9 @@ func gatewayConnectionDetails(address string) controller.ConnectionDetails {
 		host = parsedHost
 		port = parsedPort
 	}
+	if configuredHost := common.AIGatewayHostname(); configuredHost != "" {
+		host = configuredHost
+	}
 
 	uriHost := host
 	if net.ParseIP(host) != nil && strings.Contains(host, ":") {
