@@ -32,39 +32,20 @@ providers, and on-prem GPU infrastructure.
 
 ## Architecture Overview
 
-```
-                         ┌──────────────────────────┐
-                         │    External Client        │
-                         │  curl $GATEWAY_URL/v1/... │
-                         └────────────┬─────────────┘
-                                      │
-                              ┌───────▼────────┐
-                              │  LoadBalancer   │
-                              │  (External IP)  │
-                              │  :80 / :443     │
-                              └───────┬────────┘
-                                      │
-                    ┌─────────────────▼──────────────────┐
-                    │     Envoy Gateway (single LB)      │
-                    │   provider-kserve-ai-gateway        │
-                    │                                     │
-                    │  Routes by x-ai-eg-model header     │
-                    │  Token metering per model            │
-                    │  Per-user rate limiting (x-user-id)  │
-                    └──┬──────────────┬──────────────┬────┘
-                       │              │              │
-              ┌────────▼───┐  ┌──────▼─────┐  ┌────▼────────┐
-              │ AIGateway  │  │ AIGateway  │  │ AIGateway   │
-              │ Route A    │  │ Route B    │  │ Route C     │
-              │ model:     │  │ model:     │  │ model:      │
-              │ smollm     │  │ llama-8b   │  │ mixtral     │
-              └────┬───────┘  └─────┬──────┘  └──────┬──────┘
-                   │                │                 │
-              ┌────▼───────┐  ┌─────▼──────┐  ┌──────▼──────┐
-              │ Inference  │  │ Inference  │  │ Inference   │
-              │ Pool       │  │ Pool       │  │ Pool        │
-              │ (vLLM pods)│  │ (vLLM pods)│  │ (vLLM pods) │
-              └────────────┘  └────────────┘  └─────────────┘
+```mermaid
+flowchart TD
+    client["External Client<br/>HTTPS request to $GATEWAY_URL/v1/..."]
+    lb["Cloud or on-prem LoadBalancer<br/>External IP or DNS name<br/>HTTPS :443"]
+    gateway["Envoy AI Gateway<br/>provider-kserve-ai-gateway<br/><br/>Terminates client TLS<br/>Reads the OpenAI request<br/>Derives x-ai-eg-model<br/>Meters tokens<br/>Applies per-user rate limits using x-user-id"]
+    route["AIGatewayRoute<br/>Matches the requested model<br/>Selects the model's InferencePool"]
+    picker["InferencePool endpoint picker<br/>Tracks healthy model replicas<br/>Selects a vLLM endpoint"]
+    workload["vLLM GPU workload<br/>KServe-managed model pods<br/>Receives cluster-internal HTTP traffic"]
+
+    client -->|"Encrypted HTTPS"| lb
+    lb -->|"Forwards TCP :443"| gateway
+    gateway -->|"Decrypted and policy-checked request"| route
+    route -->|"InferencePool backend reference"| picker
+    picker -->|"Selected endpoint"| workload
 ```
 
 **Key:** There is one shared Gateway (`LoadBalancer`) per provider installation.
@@ -120,7 +101,7 @@ curl "$GATEWAY_URL/v1/chat/completions" \
 ### Problem
 
 k3d, kind, and minikube run Kubernetes inside Docker containers. The node IPs
-(e.g. `172.21.0.x`) are on Docker's internal network and are not roachable from
+(e.g. `172.21.0.x`) are on Docker's internal network and are not reachable from
 the host. The default k3d config disables `servicelb`:
 
 ```yaml
