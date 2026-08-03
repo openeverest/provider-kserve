@@ -9,7 +9,7 @@ PodMonitor / Prometheus setup.
 ## How it is scraped
 
 The chart renders one `PodMonitor` when both `aiGateway.enabled` and
-`metrics.podMonitor.enabled` are true:
+`metrics.podMonitor.enabled` are true and the `monitoring.coreos.com/v1` PodMonitor CRD is present (Prometheus Operator installed):
 
 ```
 charts/provider-kserve/templates/ai-gateway-podmonitor.yaml
