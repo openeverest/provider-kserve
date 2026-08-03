@@ -1,4 +1,4 @@
-{{- if and .Values.aiGateway.enabled .Values.metrics.podMonitor.enabled }}
+{{- if and .Values.aiGateway.enabled .Values.metrics.podMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PodMonitor") }}
 {{- /*
 PodMonitor for the Envoy AI Gateway's GenAI (gen_ai.*) metrics: per-model /
 per-route token usage, TTFT, TPOT, and request duration. These are the
