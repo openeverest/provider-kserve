@@ -69,6 +69,10 @@ spec:
               value: {{ ternary .Values.aiGateway.tls.hostname "" .Values.aiGateway.tls.enabled | quote }}
             - name: AI_GATEWAY_RATE_LIMIT_REDIS_URL
               value: {{ dig "rateLimit" "backend" "redis" "url" "" (index .Values "envoy-gateway").config.envoyGateway | quote }}
+            - name: ENABLE_POD_MONITOR
+              value: {{ .Values.metrics.podMonitor.enabled | quote }}
+            - name: POD_MONITOR_INTERVAL
+              value: {{ .Values.metrics.podMonitor.interval | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
