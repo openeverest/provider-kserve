@@ -1,0 +1,47 @@
+{{- if and .Values.aiGateway.enabled .Values.metrics.podMonitor.enabled }}
+{{- /*
+PodMonitor for the Envoy AI Gateway's GenAI (gen_ai.*) metrics: per-model /
+per-route token usage, TTFT, TPOT, and request duration. These are the
+token/cost signals no single vLLM pod can give you (each model pod only sees its
+own traffic; the gateway sees every request that entered the system).
+
+Unlike the per-Instance vLLM PodMonitor (emitted by the provider in Go, one per
+llm Instance), the AI Gateway is a *singleton* installed once by this chart, so
+its monitor is rendered once here, next to the Gateway itself. Gated by
+aiGateway.enabled AND metrics.podMonitor.enabled so the single metrics switch
+turns everything off together and this never appears without a gateway.
+
+The gen_ai.* metrics live on the Envoy proxy data-plane pods on a container port
+named "aigw-admin" at /metrics — NOT behind a Service, which is why this is a
+PodMonitor and not a ServiceMonitor. Port name/path per Envoy AI Gateway upstream:
+https://github.com/envoyproxy/ai-gateway/blob/main/examples/monitoring/monitoring.yaml
+If the vendored envoy-ai-gateway version renames that port, adjust `port` below.
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ printf "%s-metrics" (include "provider-kserve.aiGatewayName" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provider-kserve.labels" . | nindent 4 }}
+spec:
+  # Envoy Gateway labels the proxy data-plane pods (not this chart).
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: envoy
+      app.kubernetes.io/component: proxy
+  # Those proxy pods live in Envoy Gateway's namespace (envoy-gateway-system by
+  # default), not this release namespace, so match across namespaces.
+  namespaceSelector:
+    any: true
+  # Prometheus 3 negotiates OTel-dotted metric names (gen_ai.client.token.usage)
+  # by default, which breaks PromQL; force the classic text format so names come
+  # out underscored (gen_ai_client_token_usage).
+  # https://github.com/envoyproxy/ai-gateway/issues/1051
+  scrapeProtocols:
+    - PrometheusText0.0.4
+  podMetricsEndpoints:
+    - port: aigw-admin
+      path: /metrics
+      interval: {{ .Values.metrics.podMonitor.interval }}
+{{- end }}
