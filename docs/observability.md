@@ -193,82 +193,10 @@ kubectl create configmap vllm-dashboard \
 
 ## Gateway (token / cost) metrics
 
-The vLLM pod metrics above are the *engine's* inside view — one set per model
-pod, each seeing only its own traffic. The **Envoy AI Gateway** (enabled with
-`aiGateway.enabled`) adds the complementary **front-door** view: for every
-request that entered the system, which model was called, the input/output
-**token counts** (the basis for cost/billing), request duration, TTFT and TPOT.
-No single vLLM pod can give you this — it is a per-model/per-route aggregate the
-shared gateway alone sees.
-
-### Ownership: why this one lives in the chart, not the provider
-
-The vLLM `PodMonitor` is **per-Instance** — the provider emits one per `llm`
-Instance in Go (`syncLLM`), because each Instance has its own model pods. The AI
-Gateway is a **singleton** — installed once by the chart, shared by every
-Instance. A per-Instance reconcile is the wrong place for a singleton's monitor
-(N Instances would fight to own one object), so the gateway `PodMonitor` is a
-**chart template** (`templates/ai-gateway-podmonitor.yaml`), rendered once next
-to the Gateway and gated by `aiGateway.enabled AND metrics.podMonitor.enabled`.
-
-> Rule: **per-Instance workload → provider Go; singleton infra → chart template.**
-> Both happen to be `PodMonitor`s — the *kind* was never the distinction, the
-> *owner/lifecycle* is.
-
-### The scrape target (a PodMonitor, not a ServiceMonitor)
-
-The `gen_ai.*` metrics are emitted by the AI Gateway filter on the **Envoy proxy
-data-plane pods**, on a container port named **`aigw-admin`** at **`/metrics`** —
-*not* behind a Service. So the monitor must be a `PodMonitor`. Those proxy pods
-are labeled by Envoy Gateway (`app.kubernetes.io/name=envoy`,
-`app.kubernetes.io/component=proxy`) and live in Envoy Gateway's namespace
-(`envoy-gateway-system` by default), hence `namespaceSelector: {any: true}`.
-
-> **Gotcha (Prometheus 3):** the gateway emits OTel-native names, which
-> Prometheus 3 scrapes *dotted* (`gen_ai.client.token.usage`) by default,
-> breaking PromQL. The chart sets `scrapeProtocols: [PrometheusText0.0.4]` on
-> the `PodMonitor` so names render underscored
-> (`gen_ai_client_token_usage`). See
-> [envoyproxy/ai-gateway#1051](https://github.com/envoyproxy/ai-gateway/issues/1051).
-> vLLM does not need this — it emits classic Prometheus text.
-
-### What the gateway gives you
-
-| Metric | Type | What it tells you |
-|---|---|---|
-| `gen_ai_client_token_usage` | histogram | Tokens processed; label `gen_ai_token_type` splits `input`/`output`/`total` — **cost basis** |
-| `gen_ai_server_request_duration` | histogram | Full request duration at the gateway filter |
-| `gen_ai_server_time_to_first_token` | histogram | **TTFT** as the front door saw it |
-| `gen_ai_server_time_per_output_token` | histogram | **TPOT** / inter-token latency |
-
-Common attributes: `gen_ai_request_model`, `gen_ai_operation_name`
-(`chat`/`completion`/`embedding`/…), `gen_ai_provider_name`.
-
-```promql
-# Tokens/s per model, input vs output
-sum by (gen_ai_request_model, gen_ai_token_type) (
-  rate(gen_ai_client_token_usage_sum{gen_ai_token_type!="total"}[5m]))
-
-# Total tokens per model over the last hour (cost/usage)
-sum by (gen_ai_request_model) (
-  increase(gen_ai_client_token_usage_sum{gen_ai_token_type="total"}[1h]))
-
-# p95 request duration at the gateway
-histogram_quantile(0.95,
-  sum by (le) (rate(gen_ai_server_request_duration_bucket[5m])))
-```
-
-> Port name/path track Envoy AI Gateway upstream and can shift between versions.
-> Confirm against a live proxy pod: `kubectl port-forward <envoy-proxy-pod> ...`
-> then `curl localhost:<aigw-admin>/metrics | grep gen_ai`.
-
-### Gateway dashboard
-
-A ready-to-import dashboard lives at
-[`docs/dashboards/gateway.json`](dashboards/gateway.json). Panels: token-usage
-rate by model & type, request rate, TTFT, TPOT, request duration, and total
-tokens per model. Import it exactly like the vLLM dashboard (upload, or wrap in a
-`grafana_dashboard=1`-labeled ConfigMap for the Grafana sidecar).
+When `aiGateway.enabled` is on, the chart also emits a singleton PodMonitor for
+the Envoy AI Gateway's `gen_ai.*` metrics (per-model token/cost, TTFT, TPOT).
+Details, PromQL, and the Grafana dashboard are in
+[observability-gateway.md](observability-gateway.md).
 
 ## Whole architecture (data path)
 

@@ -347,9 +347,13 @@ Gateway gets an external address across different environments:
 Each `llm` Instance gets a `PodMonitor` so an existing Prometheus Operator
 scrapes vLLM's `:8000/metrics` (on by default; safely skipped when the
 `monitoring.coreos.com` CRDs are absent). See
-[docs/observability.md](docs/observability.md) for the metrics vLLM exposes,
-PodMonitor vs ServiceMonitor, gotchas (selector scoping), and a ready-to-import
-[Grafana dashboard](docs/dashboards/vllm.json).
+[docs/observability.md](docs/observability.md) and the
+[vLLM Grafana dashboard](docs/dashboards/vllm.json).
+
+When the AI Gateway is enabled, the chart also scrapes gateway `gen_ai.*`
+token/cost metrics. See
+[docs/observability-gateway.md](docs/observability-gateway.md) and
+[docs/dashboards/gateway.json](docs/dashboards/gateway.json).
 
 
 ## Usage
