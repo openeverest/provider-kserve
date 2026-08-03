@@ -301,6 +301,18 @@ func (p *Provider) syncLLM(c *controller.Context) error {
 		return err
 	}
 
+	// Emit a PodMonitor so an existing Prometheus Operator scrapes the vLLM
+	// /metrics endpoint. Guarded by the chart flag so clusters without the
+	// monitoring.coreos.com CRDs are never touched.
+	// ponytail: disabling the flag after enabling it leaves orphan PodMonitors
+	// until the Instance is deleted (owner-ref GC); upgrade path is a delete on
+	// the disabled branch once the CRD is known to be present.
+	if common.PodMonitorEnabled() {
+		if err := ensurePodMonitor(c); err != nil {
+			return err
+		}
+	}
+
 	// Publish the model externally when requested (LoadBalancer/NodePort).
 	// When the AI Gateway is enabled, it takes over external access and any
 	// previously created external Service is cleaned up.

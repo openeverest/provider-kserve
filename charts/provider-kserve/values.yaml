@@ -177,6 +177,20 @@ huggingface:
   # -- Name of the pre-created Secret (with an HF_TOKEN key) for gated downloads
   tokenSecretName: ""
 
+# Prometheus Operator metrics scraping. The provider ships no monitoring stack;
+# it only makes model workloads discoverable by an existing Prometheus Operator.
+metrics:
+  podMonitor:
+    # -- Emit a PodMonitor per llm Instance so an existing Prometheus Operator
+    # scrapes the vLLM /metrics endpoint. Safe to leave on: if the
+    # monitoring.coreos.com CRDs are absent the provider skips it instead of
+    # erroring. To actually collect metrics, a Prometheus must select this
+    # PodMonitor (podMonitorSelector/namespaceSelector matching the Instance
+    # namespace). See docs/observability.md.
+    enabled: true
+    # -- Scrape interval for the generated PodMonitor
+    interval: 30s
+
 # -- Additional environment variables to set on the provider container
 extraEnv: []
 # - name: MY_VAR
