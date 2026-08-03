@@ -342,6 +342,16 @@ Gateway gets an external address across different environments:
 - **Local development** (k3d, kind, minikube) — MetalLB or `minikube tunnel`
 
 
+## Observability
+
+Each `llm` Instance gets a `PodMonitor` so an existing Prometheus Operator
+scrapes vLLM's `:8000/metrics` (on by default; safely skipped when the
+`monitoring.coreos.com` CRDs are absent). See
+[docs/observability.md](docs/observability.md) for the metrics vLLM exposes,
+PodMonitor vs ServiceMonitor, gotchas (selector scoping), and a ready-to-import
+[Grafana dashboard](docs/dashboards/vllm.json).
+
+
 ## Usage
 
 See [examples/](examples/) for complete `Instance` manifests:

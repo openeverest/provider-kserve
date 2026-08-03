@@ -60,6 +60,10 @@ enable_minio = str2bool(os.getenv('ENABLE_MINIO', 'false'))
 # from dev/resources/ai-gateway-llm.yaml.
 enable_ai_gateway = str2bool(os.getenv('ENABLE_AI_GATEWAY', 'false'))
 
+# Whether to install kube-prometheus-stack (Prometheus + Grafana) and provision
+# the vLLM Grafana dashboard so model metrics are visible end-to-end.
+enable_metrics = str2bool(os.getenv('ENABLE_METRICS', 'false'))
+
 # Whether to install cert-manager. The KServe controllers require it for their
 # admission-webhook certificates. Installed as its own release (rather than the
 # bundled subchart) so the dev loop is reliable on fresh clusters. Set to false
@@ -358,4 +362,61 @@ if enable_minio:
         new_name='backup-storage',
         resource_deps=['provider-kserve'],
         labels=['backup-storage'],
+    )
+
+# ===========================
+# Metrics: Prometheus + Grafana + vLLM dashboard — optional
+# ===========================
+# Installs kube-prometheus-stack (Prometheus Operator + Prometheus + Grafana),
+# provisions the vLLM dashboard, and port-forwards Grafana. The provider already
+# emits a PodMonitor per llm Instance (metrics.podMonitor.enabled defaults on),
+# so no provider flag is needed here — only a Prometheus that will read it.
+if enable_metrics:
+    helm_repo(
+        'prometheus-community',
+        'https://prometheus-community.github.io/helm-charts',
+        labels=['metrics'],
+    )
+    helm_resource(
+        'kube-prometheus-stack',
+        'prometheus-community/kube-prometheus-stack',
+        release_name='monitoring',
+        namespace='monitoring',
+        flags=[
+            '--create-namespace',
+            # Read ALL PodMonitors, not only those labeled release=monitoring.
+            # The provider's PodMonitor has no such label, so without this
+            # Prometheus would silently ignore it (the classic empty-dashboard
+            # gotcha). See docs/observability.md.
+            '--set', 'prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false',
+            '--set', 'prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false',
+        ],
+        resource_deps=['prometheus-community'],
+        labels=['metrics'],
+    )
+
+    # Provision docs/dashboards/vllm.json into Grafana via the sidecar: a
+    # ConfigMap labeled grafana_dashboard=1 in the monitoring namespace is
+    # auto-imported on Grafana startup (no manual upload).
+    local_resource(
+        'vllm-dashboard',
+        'kubectl create configmap vllm-dashboard -n monitoring ' +
+        '--from-file=vllm.json=' + provider_dir + '/docs/dashboards/vllm.json ' +
+        '--dry-run=client -o yaml | ' +
+        'kubectl label -f - --local -o yaml grafana_dashboard=1 | ' +
+        'kubectl apply -n monitoring -f -',
+        deps=[provider_dir + '/docs/dashboards/vllm.json'],
+        resource_deps=['kube-prometheus-stack'],
+        labels=['metrics'],
+    )
+
+    # Grafana is on Service port 80; forward it explicitly (reliable, unlike
+    # attaching to one of the stack's several pods). Default creds: admin /
+    # prom-operator.
+    local_resource(
+        'grafana',
+        serve_cmd='kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80',
+        resource_deps=['kube-prometheus-stack', 'vllm-dashboard'],
+        links=[link('http://localhost:3000', 'Grafana (admin / prom-operator)')],
+        labels=['metrics'],
     )

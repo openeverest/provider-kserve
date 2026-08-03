@@ -37,6 +37,9 @@ const (
 	aiGatewayPortEnvVar      = "AI_GATEWAY_PORT"
 	aiGatewayHostnameEnvVar  = "AI_GATEWAY_HOSTNAME"
 	rateLimitRedisURLEnvVar  = "AI_GATEWAY_RATE_LIMIT_REDIS_URL"
+
+	podMonitorEnabledEnvVar  = "ENABLE_POD_MONITOR"
+	podMonitorIntervalEnvVar = "POD_MONITOR_INTERVAL"
 )
 
 // HFTokenSecretName returns the configured HuggingFace token Secret name, or an
@@ -88,4 +91,20 @@ func AIGatewayHostname() string {
 // RateLimitRedisURL returns the Redis-compatible global rate-limit backend.
 func RateLimitRedisURL() string {
 	return os.Getenv(rateLimitRedisURLEnvVar)
+}
+
+// PodMonitorEnabled reports whether the provider emits a Prometheus Operator
+// PodMonitor per llm Instance. Off by default so clusters without the
+// monitoring.coreos.com CRDs are never touched.
+func PodMonitorEnabled() bool {
+	return os.Getenv(podMonitorEnabledEnvVar) == "true"
+}
+
+// PodMonitorInterval returns the scrape interval for generated PodMonitors,
+// defaulting to 30s when unset.
+func PodMonitorInterval() string {
+	if interval := os.Getenv(podMonitorIntervalEnvVar); interval != "" {
+		return interval
+	}
+	return "30s"
 }
