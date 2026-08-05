@@ -103,11 +103,21 @@ func validateLLM(c *controller.Context) error {
 
 	var topo llm.LlmTopologyParameters
 	c.TryDecodeTopologyParameters(&topo)
-	if topo.EnableAIGateway && !common.AIGatewayEnabled() {
-		return fmt.Errorf("enableAIGateway requires aiGateway.enabled in the provider chart")
+	switch topo.ExternalAccess {
+	case "", llm.ExternalAccessClusterIP, llm.ExternalAccessLoadBalancer, llm.ExternalAccessNodePort, llm.ExternalAccessEnvoyAIGateway:
+	default:
+		return fmt.Errorf("externalAccess must be one of ClusterIP, LoadBalancer, NodePort or EnvoyAIGateway")
 	}
-	if topo.TokenLimitPerHour != nil && *topo.TokenLimitPerHour < 1 {
-		return fmt.Errorf("tokenLimitPerHour must be greater than zero")
+	if topo.UsesAIGateway() && !common.AIGatewayEnabled() {
+		return fmt.Errorf("Envoy AI Gateway requires aiGateway.enabled in the provider chart")
+	}
+	if topo.TokenLimitPerHour != nil {
+		if !topo.UsesAIGateway() {
+			return fmt.Errorf("tokenLimitPerHour requires External access = EnvoyAIGateway")
+		}
+		if *topo.TokenLimitPerHour < 1 {
+			return fmt.Errorf("tokenLimitPerHour must be greater than zero")
+		}
 	}
 	return nil
 }
@@ -140,7 +150,7 @@ func servedModelName(instanceName, configuredName string) string {
 // gatewayRoutingEnabled returns true when either Gateway API routing or the
 // Envoy AI Gateway is enabled (the AI Gateway implies gateway routing).
 func gatewayRoutingEnabled(topo llm.LlmTopologyParameters) bool {
-	return topo.EnableGatewayRouting || topo.EnableAIGateway
+	return topo.EnableGatewayRouting || topo.UsesAIGateway()
 }
 
 // routingConfigRefs returns the LLMInferenceServiceConfig baseRefs needed for
@@ -319,7 +329,7 @@ func (p *Provider) syncLLM(c *controller.Context) error {
 	var topo llm.LlmTopologyParameters
 	c.TryDecodeTopologyParameters(&topo)
 
-	if topo.EnableAIGateway {
+	if topo.UsesAIGateway() {
 		// Remove any legacy external Service (AI Gateway replaces it).
 		stale := &corev1.Service{ObjectMeta: c.ObjectMeta(externalServiceName(c.Name()))}
 		if err := c.Delete(stale); err != nil {
@@ -349,8 +359,13 @@ func (p *Provider) syncLLM(c *controller.Context) error {
 func ensureExternalService(c *controller.Context) error {
 	comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
 
+	var topo llm.LlmTopologyParameters
+	c.TryDecodeTopologyParameters(&topo)
+
 	svcType := corev1.ServiceTypeClusterIP
-	if comp.Service != nil && comp.Service.ServiceType != "" {
+	if resolved := topo.ResolvedServiceType(); resolved != "" {
+		svcType = resolved
+	} else if comp.Service != nil && comp.Service.ServiceType != "" {
 		svcType = comp.Service.ServiceType
 	}
 
@@ -473,7 +488,7 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 
 		// When the AI Gateway is enabled, connection details come from the
 		// Gateway's external address rather than the direct workload URL.
-		if topo.EnableAIGateway {
+		if topo.UsesAIGateway() {
 			details, waiting, err := aiGatewayConnectionDetails(c)
 			if err != nil {
 				return controller.Status{}, err
@@ -510,8 +525,13 @@ func (p *Provider) llmConnectionDetails(c *controller.Context, llmisvc *kservev1
 	}
 
 	comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
+	var topo llm.LlmTopologyParameters
+	c.TryDecodeTopologyParameters(&topo)
+
 	svcType := corev1.ServiceTypeClusterIP
-	if comp.Service != nil && comp.Service.ServiceType != "" {
+	if resolved := topo.ResolvedServiceType(); resolved != "" {
+		svcType = resolved
+	} else if comp.Service != nil && comp.Service.ServiceType != "" {
 		svcType = comp.Service.ServiceType
 	}
 

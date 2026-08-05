@@ -54,6 +54,21 @@ func TestGatewayRoutingEnabled(t *testing.T) {
 			},
 			expected: true,
 		},
+		{
+			name: "externalAccess EnvoyAIGateway implies routing",
+			params: llm.LlmTopologyParameters{
+				ExternalAccess: llm.ExternalAccessEnvoyAIGateway,
+			},
+			expected: true,
+		},
+		{
+			name: "externalAccess ClusterIP ignores legacy enableAIGateway",
+			params: llm.LlmTopologyParameters{
+				ExternalAccess:  llm.ExternalAccessClusterIP,
+				EnableAIGateway: true,
+			},
+			expected: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
