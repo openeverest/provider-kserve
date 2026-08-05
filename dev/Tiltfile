@@ -44,6 +44,11 @@ openeverest_version = os.getenv('OPENEVEREST_VERSION', '2.0.0-dev.1')
 openeverest_helm_repo = os.getenv(
     'OPENEVEREST_HELM_REPO', 'https://openeverest.github.io/helm-charts/')
 
+# OpenEverest git ref for CRDs not yet bundled in the published core chart.
+# release-2.0 includes the unified parametersSchema API
+# (https://github.com/openeverest/openeverest/pull/2583).
+openeverest_crd_branch = os.getenv('OPENEVEREST_BRANCH', 'release-2.0')
+
 # Namespaces.
 everest_namespace = os.getenv('EVEREST_NAMESPACE', 'everest-system')
 # The provider bundles the KServe controllers and the KServe runtime configs
@@ -141,8 +146,45 @@ if install_openeverest:
         release_name='everest',
         namespace=everest_namespace,
         flags=core_flags,
-        port_forwards=[port_forward(8080, 8080, 'Everest UI/API')],
         resource_deps=['openeverest-repo'],
+        labels=['openeverest'],
+    )
+
+    # Keep the UI reachable at http://localhost:8080 while Tilt is running.
+    # helm_resource port_forwards often miss the everest Service; kubectl PF is reliable.
+    local_resource(
+        'everest-ui',
+        serve_cmd='kubectl port-forward svc/everest -n {0} 8080:8080'.format(
+            everest_namespace),
+        resource_deps=['openeverest'],
+        links=[link('http://localhost:8080', 'Everest UI (admin / admin)')],
+        labels=['openeverest'],
+    )
+
+    # Upgrade OpenEverest CRDs after core install. The published 2.0.0-dev.1
+    # chart still ships pre-#2583 schemas (customSpecSchema/configSchema); the
+    # provider emits parametersSchema and needs the release-2.0 CRDs.
+    openeverest_crd_base = 'https://raw.githubusercontent.com/openeverest/openeverest/{0}/config/crd/bases'.format(
+        openeverest_crd_branch)
+    openeverest_crd_files = [
+        'core.openeverest.io_providers.yaml',
+        'core.openeverest.io_instances.yaml',
+        'core.openeverest.io_instancepresets.yaml',
+        'monitoring.openeverest.io_monitoringconfigs.yaml',
+        'backup.openeverest.io_backupclasses.yaml',
+        'backup.openeverest.io_backups.yaml',
+        'backup.openeverest.io_restores.yaml',
+        'backup.openeverest.io_backupstorages.yaml',
+    ]
+    openeverest_crd_cmds = [
+        'kubectl apply --server-side --force-conflicts -f {0}/{1}'.format(
+            openeverest_crd_base, crd_file)
+        for crd_file in openeverest_crd_files
+    ]
+    local_resource(
+        'openeverest-crds',
+        ' && '.join(openeverest_crd_cmds),
+        resource_deps=['openeverest'],
         labels=['openeverest'],
     )
 
@@ -248,7 +290,7 @@ local_resource(
 
 provider_resource_deps = ['provider-build', 'provider-helm-deps']
 if install_openeverest:
-    provider_resource_deps = provider_resource_deps + ['openeverest']
+    provider_resource_deps = provider_resource_deps + ['openeverest', 'openeverest-crds']
 if install_cert_manager:
     provider_resource_deps = provider_resource_deps + ['cert-manager']
 

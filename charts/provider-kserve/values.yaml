@@ -100,6 +100,59 @@ affinity: {}
 provider:
   # -- The name to register for the Provider custom resource
   name: provider-kserve
+  # -- Short identifier for the provider, used in resource names
+  # This appears in preset names (e.g., '<shortName>-llm-cpu') and can be
+  # used in other contexts where a short concise provider identifier is needed.
+  shortName: kserve
+
+# -- Default instance presets configuration
+# Each preset must have 'name', 'enabled', and 'spec' fields.
+# The 'spec' field contains the full InstancePresetSpec.
+# Note: The provider shortName will be automatically added to each preset name.
+presets:
+  - name: llm-cpu
+    enabled: true
+    spec:
+      providerRef:
+        name: provider-kserve
+      topology:
+        type: llm
+      components:
+        llmEngine:
+          type: vllm
+          replicas: 1
+          resources:
+            limits:
+              cpu: "4"
+              memory: 16Gi
+          service:
+            serviceType: ClusterIP
+          parameters:
+            modelURI: hf://Qwen/Qwen2.5-0.5B-Instruct
+            modelName: qwen2.5-0.5b-instruct
+            computeProfile: cpu
+  - name: llm-gpu
+    enabled: true
+    spec:
+      providerRef:
+        name: provider-kserve
+      topology:
+        type: llm
+      components:
+        llmEngine:
+          type: vllm
+          replicas: 1
+          resources:
+            limits:
+              cpu: "4"
+              memory: 16Gi
+              nvidia.com/gpu: "1"
+          service:
+            serviceType: ClusterIP
+          parameters:
+            modelURI: hf://Qwen/Qwen2.5-0.5B-Instruct
+            modelName: qwen2.5-0.5b-instruct
+            computeProfile: gpu
 
 # ---------------------------------------------------------------------------
 # LLM model catalog.
@@ -326,7 +379,8 @@ cpuProfile:
 #
 # When enabled, the chart installs compatible Envoy Gateway and Envoy AI
 # Gateway controllers and creates one shared Gateway. Individual llm Instances
-# opt in with `spec.topology.parameters.enableAIGateway`.
+# opt in with `spec.topology.parameters.enableAIGateway: true`.
+# TLS is chart-level (`aiGateway.tls`), not an Instance form field.
 aiGateway:
   # -- Install and configure the shared Envoy AI Gateway stack
   enabled: false
