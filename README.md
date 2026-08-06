@@ -55,12 +55,15 @@ This provider has **not been released yet** — the table describes `main`.
 
 ## Capabilities
 
+What you can do to a running instance through the `Instance` API. Upgrading the
+provider itself is covered under [Installation](#installation).
+
 | Capability | Status | Notes |
 |---|---|---|
 | Provisioning | ✅ | |
 | Horizontal scaling | ✅ | `replicas`, or `minReplicas` / `maxReplicas` on the `predictor` component (`0` enables scale-to-zero) |
 | Vertical scaling (CPU / memory) | ✅ | `spec.components.<name>.resources`; limits are mirrored into requests (Guaranteed QoS) |
-| Version upgrades | ✅ | change `spec.version`; see [Versions](#versions) |
+| Version upgrades | ✅ | of the deployed serving runtime version — change `spec.version`; see [Versions](#versions) |
 | Custom configuration | ✅ | structured parameters, plus an inline `LLMInferenceServiceConfig` escape hatch |
 | Monitoring | ✅ | a `PodMonitor` per `llm` Instance; gateway token/cost metrics when the AI Gateway is enabled |
 | TLS | ✅ | optional HTTPS on the shared Envoy AI Gateway, issued by cert-manager |
