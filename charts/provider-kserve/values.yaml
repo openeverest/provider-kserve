@@ -100,6 +100,59 @@ affinity: {}
 provider:
   # -- The name to register for the Provider custom resource
   name: provider-kserve
+  # -- Short identifier for the provider, used in resource names
+  # This appears in preset names (e.g., '<shortName>-llm-cpu') and can be
+  # used in other contexts where a short concise provider identifier is needed.
+  shortName: kserve
+
+# -- Default instance presets configuration
+# Each preset must have 'name', 'enabled', and 'spec' fields.
+# The 'spec' field contains the full InstancePresetSpec.
+# Note: The provider shortName will be automatically added to each preset name.
+presets:
+  - name: llm-cpu
+    enabled: true
+    spec:
+      providerRef:
+        name: provider-kserve
+      topology:
+        type: llm
+      components:
+        llmEngine:
+          type: vllm
+          replicas: 1
+          resources:
+            limits:
+              cpu: "4"
+              memory: 16Gi
+          service:
+            serviceType: ClusterIP
+          parameters:
+            modelURI: hf://Qwen/Qwen2.5-0.5B-Instruct
+            modelName: qwen2.5-0.5b-instruct
+            computeProfile: cpu
+  - name: llm-gpu
+    enabled: true
+    spec:
+      providerRef:
+        name: provider-kserve
+      topology:
+        type: llm
+      components:
+        llmEngine:
+          type: vllm
+          replicas: 1
+          resources:
+            limits:
+              cpu: "4"
+              memory: 16Gi
+              nvidia.com/gpu: "1"
+          service:
+            serviceType: ClusterIP
+          parameters:
+            modelURI: hf://Qwen/Qwen2.5-0.5B-Instruct
+            modelName: qwen2.5-0.5b-instruct
+            computeProfile: gpu
 
 # ---------------------------------------------------------------------------
 # LLM model catalog.
@@ -176,6 +229,20 @@ models:
 huggingface:
   # -- Name of the pre-created Secret (with an HF_TOKEN key) for gated downloads
   tokenSecretName: ""
+
+# Prometheus Operator metrics scraping. The provider ships no monitoring stack;
+# it only makes model workloads discoverable by an existing Prometheus Operator.
+metrics:
+  podMonitor:
+    # -- Emit a PodMonitor per llm Instance so an existing Prometheus Operator
+    # scrapes the vLLM /metrics endpoint. Safe to leave on: if the
+    # monitoring.coreos.com CRDs are absent the provider skips it instead of
+    # erroring. To actually collect metrics, a Prometheus must select this
+    # PodMonitor (podMonitorSelector/namespaceSelector matching the Instance
+    # namespace). See docs/observability.md.
+    enabled: true
+    # -- Scrape interval for the generated PodMonitor
+    interval: 30s
 
 # -- Additional environment variables to set on the provider container
 extraEnv: []
@@ -306,4 +373,86 @@ cpuProfile:
   # topology's Runtime section (spec.components.llmEngine.resources) and applied
   # to the model server container, so sizing is finetuned per instance rather
   # than shared across all CPU instances.
+
+# ---------------------------------------------------------------------------
+# Optional Envoy AI Gateway.
+#
+# When enabled, the chart installs compatible Envoy Gateway and Envoy AI
+# Gateway controllers and creates one shared Gateway. Individual llm Instances
+# opt in with `spec.topology.parameters.enableAIGateway: true`.
+# TLS is chart-level (`aiGateway.tls`), not an Instance form field.
+aiGateway:
+  # -- Install and configure the shared Envoy AI Gateway stack
+  enabled: false
+  # -- Scheme published in Instance connection details
+  scheme: http
+  listener:
+    # -- Gateway listener protocol
+    protocol: HTTP
+    # -- Gateway listener and public connection port
+    port: 80
+  tls:
+    # -- Issue a public certificate and expose the Gateway over HTTPS on port 443
+    enabled: false
+    # -- DNS name clients use for the Gateway, for example llm.example.com
+    hostname: ""
+    # -- Secret populated by cert-manager; empty uses <gateway-name>-tls
+    secretName: ""
+    # -- Existing cert-manager Issuer or ClusterIssuer
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
+      group: cert-manager.io
+  gatewayService:
+    # -- Envoy proxy Service type (LoadBalancer, NodePort, or ClusterIP)
+    type: LoadBalancer
+
+# Envoy Gateway subchart configuration required by Envoy AI Gateway v0.4.
+envoy-gateway:
+  config:
+    envoyGateway:
+      gateway:
+        controllerName: gateway.envoyproxy.io/gatewayclass-controller
+      extensionApis:
+        enableEnvoyPatchPolicy: true
+        enableBackend: true
+      extensionManager:
+        backendResources:
+          - group: inference.networking.k8s.io
+            kind: InferencePool
+            version: v1
+        hooks:
+          xdsTranslator:
+            translation:
+              listener:
+                includeAll: true
+              route:
+                includeAll: true
+              cluster:
+                includeAll: true
+              secret:
+                includeAll: true
+            post:
+              - Translation
+              - Cluster
+              - Route
+        service:
+          fqdn:
+            hostname: ai-gateway-controller
+            port: 1063
+      # To enable per-user token quotas, add an existing Redis/Valkey endpoint:
+      # rateLimit:
+      #   backend:
+      #     type: Redis
+      #     redis:
+      #       url: valkey.default.svc.cluster.local:6379
+
+# Both optional controllers are installed into the provider release namespace.
+# This upstream value is supplemented by a release-namespace binding rendered
+# by this chart.
+envoy-ai-gateway:
+  envoyGateway:
+    namespace: default
+
+envoy-ai-gateway-crds: {}
 

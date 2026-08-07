@@ -4,7 +4,9 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
@@ -24,6 +26,20 @@ type Provider struct {
 
 // New creates a new Provider instance.
 func New() *Provider {
+	watches := []controller.WatchConfig{
+		controller.WatchOwned(&kservev1alpha2.LLMInferenceService{}),
+		controller.WatchOwned(&kservev1alpha2.LLMInferenceServiceConfig{}),
+		controller.WatchOwned(&kservev1beta1.InferenceService{}),
+		controller.WatchOwned(&corev1.Service{}),
+	}
+	if common.AIGatewayEnabled() {
+		watches = append(watches, controller.WatchOwned(unstructuredObject(aiGatewayRouteGVK)))
+	}
+	// Note: the PodMonitor is intentionally NOT watched. Owning a watch on
+	// monitoring.coreos.com/PodMonitor would fail the manager at startup on any
+	// cluster without the Prometheus Operator CRDs. Since metrics default on, we
+	// keep the emit-only path and let the periodic resync re-apply on drift.
+
 	return &Provider{
 		BaseProvider: controller.BaseProvider{
 			ProviderName: common.ProviderName,
@@ -31,14 +47,15 @@ func New() *Provider {
 				kservev1beta1.AddToScheme,
 				kservev1alpha2.AddToScheme,
 			},
-			WatchConfigs: []controller.WatchConfig{
-				controller.WatchOwned(&kservev1alpha2.LLMInferenceService{}),
-				controller.WatchOwned(&kservev1alpha2.LLMInferenceServiceConfig{}),
-				controller.WatchOwned(&kservev1beta1.InferenceService{}),
-				controller.WatchOwned(&corev1.Service{}),
-			},
+			WatchConfigs: watches,
 		},
 	}
+}
+
+func unstructuredObject(gvk schema.GroupVersionKind) *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(gvk)
+	return obj
 }
 
 // Validate checks if the Instance spec is valid.

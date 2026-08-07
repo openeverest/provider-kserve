@@ -65,4 +65,23 @@ dependencies:
     version: "v0.19.0"
     repository: "oci://ghcr.io/kserve/charts"
     condition: kserveRuntimeConfigs.enabled
+  # Optional Envoy data-plane controller. AI Gateway v0.4 requires Envoy
+  # Gateway v1.5+ and the xDS extension-manager integration configured in
+  # values.yaml.
+  - name: gateway-helm
+    alias: envoy-gateway
+    version: "v1.5.9"
+    repository: "oci://docker.io/envoyproxy"
+    condition: aiGateway.enabled
+  # Envoy AI Gateway installs its CRDs separately from its controller chart.
+  - name: ai-gateway-crds-helm
+    alias: envoy-ai-gateway-crds
+    version: "v0.4.0"
+    repository: "oci://docker.io/envoyproxy"
+    condition: aiGateway.enabled
+  - name: ai-gateway-helm
+    alias: envoy-ai-gateway
+    version: "v0.4.0"
+    repository: "oci://docker.io/envoyproxy"
+    condition: aiGateway.enabled
 

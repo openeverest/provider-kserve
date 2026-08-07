@@ -29,14 +29,22 @@ package provider
 // +kubebuilder:rbac:groups=serving.kserve.io,resources=inferenceservices/status,verbs=get
 // +kubebuilder:rbac:groups=serving.kserve.io,resources=inferenceservices/finalizers,verbs=update
 
+// Envoy AI Gateway resources used by the optional llm access path:
+// +kubebuilder:rbac:groups=aigateway.envoyproxy.io,resources=aigatewayroutes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=aigateway.envoyproxy.io,resources=aigatewayroutes/status,verbs=get
+// +kubebuilder:rbac:groups=gateway.envoyproxy.io,resources=backendtrafficpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch
+
+// Prometheus Operator PodMonitor emitted per llm Instance (optional metrics):
+// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=podmonitors,verbs=get;list;watch;create;update;patch;delete
+
 // Core resources referenced by model serving (model credentials, endpoints).
-// Connection secrets are created/managed in the Instance's namespace, so secrets
-// require write verbs in addition to read.
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // The provider creates an external Service (LoadBalancer/NodePort) fronting the
-// llm workload when the user selects that expose type, so services need write
-// verbs; nodes are read to resolve a NodePort's reachable address.
+// llm workload when the user selects that expose type, and removes legacy
+// Services when AI Gateway takes over external access.
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 // ServiceAccounts carry the HuggingFace token Secret for gated model downloads

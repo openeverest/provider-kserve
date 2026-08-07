@@ -36,6 +36,12 @@ spec:
     containers:
     - name: main
       image: {{ .Values.cpuProfile.image | quote }}
+      # On the CPU backend vLLM reuses --gpu-memory-utilization to cap the
+      # fraction of host RAM reserved for KV-cache.  The default (0.92) is too
+      # aggressive for small dev nodes, so we lower it here.
+      env:
+      - name: VLLM_ADDITIONAL_ARGS
+        value: "--gpu-memory-utilization {{ .Values.cpuProfile.gpuMemoryUtilization | default 0.25 }}"
       # The published CPU vLLM images run as root, but the base preset sets
       # runAsNonRoot: true, so the kubelet refuses to start the container.
       # Override the container securityContext to allow root for this profile.

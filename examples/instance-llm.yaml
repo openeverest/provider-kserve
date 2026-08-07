@@ -27,8 +27,12 @@ spec:
   topology:
     type: llm
     parameters:
-      # Expose the model through the Gateway API Inference Extension for
-      # prefix-cache aware routing across replicas.
+      # ClusterIP | LoadBalancer | NodePort | EnvoyAIGateway
+      externalAccess: ClusterIP
+      # Per-user quota when externalAccess is EnvoyAIGateway and the chart
+      # has a Redis/Valkey rate-limit backend configured.
+      # tokenLimitPerHour: 1000
+      # Gateway API Inference Extension (prefix-cache aware routing).
       enableGatewayRouting: false
       # Disaggregated prefill/decode (llm-d pattern). Requires enough GPUs.
       enablePrefill: false
@@ -40,11 +44,9 @@ spec:
       type: vllm
       # Number of decode replicas.
       replicas: 1
-      # How the model is exposed. ClusterIP (default) keeps it in-cluster only;
-      # LoadBalancer/NodePort make the provider create an extra Service fronting
-      # the model pods (vLLM listens on port 8000) and publish its address in the
-      # connection details. Annotations and loadBalancerService.sourceRanges are
-      # honored for cloud LoadBalancers.
+      # How the model is exposed (same pattern as MongoDB External access).
+      # ClusterIP (default) keeps it in-cluster; LoadBalancer/NodePort create
+      # an extra Service fronting the model pods.
       service:
         serviceType: ClusterIP
         # annotations:

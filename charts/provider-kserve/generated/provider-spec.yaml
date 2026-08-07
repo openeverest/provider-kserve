@@ -73,11 +73,18 @@ spec:
       parametersSchema:
         openAPIV3Schema:
           properties:
+            enableAIGateway:
+              type: boolean
             enableGatewayRouting:
               type: boolean
             enablePrefill:
               type: boolean
+            externalAccess:
+              type: string
             prefillReplicas:
+              format: int32
+              type: integer
+            tokenLimitPerHour:
               format: int32
               type: integer
           type: object
@@ -148,10 +155,15 @@ spec:
           components:
             enablePrefill:
               fieldParams:
-                defaultValue: false
+                defaultValue: "false"
                 label: Enable Prefill/Decode Disaggregation
+                options:
+                  - label: Disabled
+                    value: "false"
+                  - label: Enabled
+                    value: "true"
               path: spec.topology.parameters.enablePrefill
-              uiType: switch
+              uiType: select
             prefillReplicas:
               fieldParams:
                 defaultValue: 1
@@ -161,31 +173,44 @@ spec:
               validation:
                 max: 32
                 min: 0
+          componentsOrder:
+            - enablePrefill
+            - prefillReplicas
           description: Split prefill and decode into independently scaled deployments (llm-d pattern).
           label: Disaggregated Serving
-        exposure:
+        routing:
           components:
-            enableGatewayRouting:
-              fieldParams:
-                defaultValue: false
-                label: Enable Gateway API Routing
-              path: spec.topology.parameters.enableGatewayRouting
-              uiType: switch
-            serviceType:
+            externalAccess:
               fieldParams:
                 defaultValue: ClusterIP
                 label: External access
                 options:
-                  - label: ClusterIP (in-cluster only)
+                  - label: ClusterIP
                     value: ClusterIP
                   - label: LoadBalancer
                     value: LoadBalancer
                   - label: NodePort
                     value: NodePort
-              path: spec.components.llmEngine.service.serviceType
+                  - label: Envoy AI Gateway
+                    value: EnvoyAIGateway
+              path: spec.topology.parameters.externalAccess
               uiType: select
-          description: Configure how clients reach the model. Choose the Service type for external access; ClusterIP keeps it in-cluster only (reach it via port-forward or another pod), while LoadBalancer and NodePort publish an external address (the provider creates an extra Service selecting the model pods, which listen on port 8000, and reports the endpoint in the connection details). Optionally enable the Gateway API Inference Extension for prefix-cache aware routing across replicas.
-          label: Exposure
+            tokenLimitPerHour:
+              fieldParams:
+                helperText: Only with Envoy AI Gateway. Leave empty for the default (1000) when a Redis/Valkey rate-limit backend is configured.
+                label: Tokens per User per Hour
+              path: spec.topology.parameters.tokenLimitPerHour
+              uiType: number
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.topology.parameters.tokenLimitPerHour) || spec.topology.parameters.externalAccess == "EnvoyAIGateway"'
+                    message: Tokens per User per Hour requires External access = Envoy AI Gateway
+                min: 1
+          componentsOrder:
+            - externalAccess
+            - tokenLimitPerHour
+          description: 'Configure how clients reach the model. Pick one external access path: a per-instance Service (ClusterIP / LoadBalancer / NodePort), or the shared Envoy AI Gateway (token metering and optional per-user quotas).'
+          label: Routing
         runtime:
           components:
             computeProfile:
@@ -275,7 +300,7 @@ spec:
         - basicInfo
         - scaling
         - runtime
-        - exposure
+        - routing
         - disaggregation
         - advanced
     predictor:

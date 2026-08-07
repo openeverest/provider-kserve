@@ -156,46 +156,60 @@ ui:
       - computeProfile
       - resources
       - kvCacheSpaceGi
-    exposure:
-      label: Exposure
+    routing:
+      label: Routing
       description: >-
-        Configure how clients reach the model. Choose the Service type for
-        external access; ClusterIP keeps it in-cluster only (reach it via
-        port-forward or another pod), while LoadBalancer and NodePort publish an
-        external address (the provider creates an extra Service selecting the
-        model pods, which listen on port 8000, and reports the endpoint in the
-        connection details). Optionally enable the Gateway API Inference
-        Extension for prefix-cache aware routing across replicas.
+        Configure how clients reach the model. Pick one external access path:
+        a per-instance Service (ClusterIP / LoadBalancer / NodePort), or the
+        shared Envoy AI Gateway (token metering and optional per-user quotas).
       components:
-        serviceType:
+        externalAccess:
           uiType: select
-          path: spec.components.llmEngine.service.serviceType
+          path: spec.topology.parameters.externalAccess
           fieldParams:
             label: External access
             defaultValue: ClusterIP
             options:
-            - label: ClusterIP (in-cluster only)
+            - label: ClusterIP
               value: ClusterIP
             - label: LoadBalancer
               value: LoadBalancer
             - label: NodePort
               value: NodePort
-        enableGatewayRouting:
-          uiType: switch
-          path: spec.topology.parameters.enableGatewayRouting
+            - label: Envoy AI Gateway
+              value: EnvoyAIGateway
+        tokenLimitPerHour:
+          uiType: number
+          path: spec.topology.parameters.tokenLimitPerHour
           fieldParams:
-            label: Enable Gateway API Routing
-            defaultValue: false
+            label: Tokens per User per Hour
+            helperText: >-
+              Only with Envoy AI Gateway. Leave empty for the default (1000)
+              when a Redis/Valkey rate-limit backend is configured.
+          validation:
+            min: 1
+            celExpressions:
+            # cel-js throws on missing keys with "== null"; use has() instead.
+            - celExpr: '!has(spec.topology.parameters.tokenLimitPerHour) || spec.topology.parameters.externalAccess == "EnvoyAIGateway"'
+              message: Tokens per User per Hour requires External access = Envoy AI Gateway
+      componentsOrder:
+      - externalAccess
+      - tokenLimitPerHour
     disaggregation:
       label: Disaggregated Serving
       description: Split prefill and decode into independently scaled deployments (llm-d pattern).
       components:
         enablePrefill:
-          uiType: switch
+          uiType: select
           path: spec.topology.parameters.enablePrefill
           fieldParams:
             label: Enable Prefill/Decode Disaggregation
-            defaultValue: false
+            defaultValue: "false"
+            options:
+            - label: Disabled
+              value: "false"
+            - label: Enabled
+              value: "true"
         prefillReplicas:
           uiType: number
           path: spec.topology.parameters.prefillReplicas
@@ -205,6 +219,9 @@ ui:
           validation:
             min: 0
             max: 32
+      componentsOrder:
+      - enablePrefill
+      - prefillReplicas
     advanced:
       label: Advanced
       description: >-
@@ -235,6 +252,6 @@ ui:
   - basicInfo
   - scaling
   - runtime
-  - exposure
+  - routing
   - disaggregation
   - advanced

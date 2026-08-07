@@ -53,6 +53,26 @@ spec:
             # workloads so KServe can download gated HuggingFace models.
             - name: HF_TOKEN_SECRET_NAME
               value: {{ .Values.huggingface.tokenSecretName | quote }}
+            - name: AI_GATEWAY_NAME
+              value: {{ include "provider-kserve.aiGatewayName" . | quote }}
+            - name: AI_GATEWAY_ENABLED
+              value: {{ .Values.aiGateway.enabled | quote }}
+            - name: AI_GATEWAY_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: AI_GATEWAY_SCHEME
+              value: {{ include "provider-kserve.aiGatewayScheme" . | quote }}
+            - name: AI_GATEWAY_PORT
+              value: {{ include "provider-kserve.aiGatewayPort" . | quote }}
+            - name: AI_GATEWAY_HOSTNAME
+              value: {{ ternary .Values.aiGateway.tls.hostname "" .Values.aiGateway.tls.enabled | quote }}
+            - name: AI_GATEWAY_RATE_LIMIT_REDIS_URL
+              value: {{ dig "rateLimit" "backend" "redis" "url" "" (index .Values "envoy-gateway").config.envoyGateway | quote }}
+            - name: ENABLE_POD_MONITOR
+              value: {{ .Values.metrics.podMonitor.enabled | quote }}
+            - name: POD_MONITOR_INTERVAL
+              value: {{ .Values.metrics.podMonitor.interval | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

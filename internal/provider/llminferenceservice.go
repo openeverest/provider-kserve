@@ -1,4 +1,3 @@
-// Package provider — LLMInferenceService (serving.kserve.io/v1alpha2) builder.
 package provider
 
 import (
@@ -101,6 +100,25 @@ func validateLLM(c *controller.Context) error {
 			return fmt.Errorf("%s.service.serviceType must be one of ClusterIP, LoadBalancer or NodePort", common.ComponentLlmEngine)
 		}
 	}
+
+	var topo llm.LlmTopologyParameters
+	c.TryDecodeTopologyParameters(&topo)
+	switch topo.ExternalAccess {
+	case "", llm.ExternalAccessClusterIP, llm.ExternalAccessLoadBalancer, llm.ExternalAccessNodePort, llm.ExternalAccessEnvoyAIGateway:
+	default:
+		return fmt.Errorf("externalAccess must be one of ClusterIP, LoadBalancer, NodePort or EnvoyAIGateway")
+	}
+	if topo.UsesAIGateway() && !common.AIGatewayEnabled() {
+		return fmt.Errorf("Envoy AI Gateway requires aiGateway.enabled in the provider chart")
+	}
+	if topo.TokenLimitPerHour != nil {
+		if !topo.UsesAIGateway() {
+			return fmt.Errorf("tokenLimitPerHour requires External access = EnvoyAIGateway")
+		}
+		if *topo.TokenLimitPerHour < 1 {
+			return fmt.Errorf("tokenLimitPerHour must be greater than zero")
+		}
+	}
 	return nil
 }
 
@@ -121,6 +139,36 @@ func instanceConfigName(instance string) string {
 	return instance + instanceConfigSuffix
 }
 
+// servedModelName returns the model name advertised in the OpenAI API.
+func servedModelName(instanceName, configuredName string) string {
+	if configuredName != "" {
+		return configuredName
+	}
+	return instanceName
+}
+
+// gatewayRoutingEnabled returns true when either Gateway API routing or the
+// Envoy AI Gateway is enabled (the AI Gateway implies gateway routing).
+func gatewayRoutingEnabled(topo llm.LlmTopologyParameters) bool {
+	return topo.EnableGatewayRouting || topo.UsesAIGateway()
+}
+
+// routingConfigRefs returns the LLMInferenceServiceConfig baseRefs needed for
+// Gateway API routing (scheduler + optional route config).
+func routingConfigRefs(topo llm.LlmTopologyParameters) []string {
+	if !gatewayRoutingEnabled(topo) {
+		return nil
+	}
+
+	refs := []string{
+		"kserve-config-llm-scheduler",
+	}
+	if topo.EnableGatewayRouting {
+		refs = append(refs, "kserve-config-llm-router-route")
+	}
+	return refs
+}
+
 // buildLLMInferenceService translates an Instance into an LLMInferenceService.
 func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferenceService, error) {
 	comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
@@ -139,9 +187,7 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 	spec := kservev1alpha2.LLMInferenceServiceSpec{
 		Model: kservev1alpha2.LLMModelSpec{URI: *uri},
 	}
-	if params.ModelName != "" {
-		spec.Model.Name = ptr.To(params.ModelName)
-	}
+	spec.Model.Name = ptr.To(servedModelName(c.Name(), params.ModelName))
 
 	// Static replicas from the component spec.
 	if comp.Replicas != nil {
@@ -165,10 +211,6 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 	if comp.Resources != nil {
 		res := *comp.Resources
 		// For the CPU profile, mirror limits into requests (Guaranteed QoS).
-		// vLLM CPU probes *host-free* memory (not the cgroup limit) when sizing
-		// its KV cache and refuses to start if too little is free. Reserving the
-		// memory via requests keeps the scheduler from packing the pod onto an
-		// oversubscribed node where that probe fails.
 		if isCPUProfile {
 			res = mirrorLimitsToRequests(res)
 		}
@@ -177,10 +219,7 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 	}
 
 	// vLLM CPU auto-sizes its KV cache from host-free memory when
-	// VLLM_CPU_KVCACHE_SPACE is unset, which adapts to the node. Only set it when
-	// the user explicitly overrides it; a value derived from the container limit
-	// cannot account for the (large, model-independent) CPU runtime footprint and
-	// tends to exceed what is actually free at startup.
+	// VLLM_CPU_KVCACHE_SPACE is unset.
 	if isCPUProfile && params.KVCacheSpaceGi != nil {
 		kv := int(*params.KVCacheSpaceGi)
 		if kv < 1 {
@@ -196,11 +235,7 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		}
 	}
 
-	// Attach the HuggingFace token ServiceAccount (created by
-	// ensureModelPullerServiceAccount) so KServe's storage-initializer can
-	// authenticate gated model downloads. KServe honors a user-set workload
-	// ServiceAccountName only when no routing sidecar is present, so this path
-	// covers the common (non-gateway-routing) gated download case.
+	// Attach the HuggingFace token ServiceAccount.
 	if common.HFTokenSecretName() != "" {
 		if spec.WorkloadSpec.Template == nil {
 			spec.WorkloadSpec.Template = &corev1.PodSpec{}
@@ -209,17 +244,19 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 	}
 
 	// Config inheritance. The CPU compute profile composes the bundled CPU-only
-	// LLMInferenceServiceConfig ahead of any user baseRefs, so an explicit
-	// baseRef still wins on conflict (later refs override earlier ones).
+	// LLMInferenceServiceConfig ahead of any user baseRefs.
 	if isCPUProfile {
 		spec.BaseRefs = append(spec.BaseRefs, corev1.LocalObjectReference{Name: cpuProfileConfigName})
+	}
+	var topo llm.LlmTopologyParameters
+	c.TryDecodeTopologyParameters(&topo)
+	for _, name := range routingConfigRefs(topo) {
+		spec.BaseRefs = append(spec.BaseRefs, corev1.LocalObjectReference{Name: name})
 	}
 	for _, ref := range params.BaseRefs {
 		spec.BaseRefs = append(spec.BaseRefs, corev1.LocalObjectReference{Name: ref})
 	}
-	// The inline Advanced config (materialized by ensureLLMConfig) is attached
-	// last, so it overrides the CPU preset and any user baseRefs above while the
-	// Instance's own structured fields (set on this spec) still win over it.
+	// The inline Advanced config (materialized by ensureLLMConfig) is attached last.
 	if strings.TrimSpace(params.Config) != "" {
 		spec.BaseRefs = append(spec.BaseRefs, corev1.LocalObjectReference{Name: instanceConfigName(c.Name())})
 	}
@@ -228,18 +265,6 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 	if params.DisableStorageInitializer != nil {
 		spec.StorageInitializer = &kservev1alpha2.StorageInitializerSpec{
 			Enabled: ptr.To(!*params.DisableStorageInitializer),
-		}
-	}
-
-	// Topology-level options (routing, disaggregation).
-	var topo llm.LlmTopologyParameters
-	c.TryDecodeTopologyParameters(&topo)
-
-	if topo.EnableGatewayRouting {
-		spec.Router = &kservev1alpha2.RouterSpec{
-			Route:     &kservev1alpha2.GatewayRoutesSpec{},
-			Gateway:   &kservev1alpha2.GatewaySpec{},
-			Scheduler: &kservev1alpha2.SchedulerSpec{},
 		}
 	}
 
@@ -273,8 +298,7 @@ func (p *Provider) syncLLM(c *controller.Context) error {
 		}
 	}
 
-	// Materialize the inline Advanced config before the workload: it is
-	// referenced via baseRefs and KServe errors if the config does not yet exist.
+	// Materialize the inline Advanced config before the workload.
 	if err := ensureLLMConfig(c); err != nil {
 		return err
 	}
@@ -287,9 +311,44 @@ func (p *Provider) syncLLM(c *controller.Context) error {
 		return err
 	}
 
-	// Publish the model externally when requested (LoadBalancer/NodePort). This
-	// is a provider-owned Service fronting the KServe workload pods; ClusterIP
-	// needs none (KServe's own workload Service already covers in-cluster).
+	// Emit a PodMonitor so an existing Prometheus Operator scrapes the vLLM
+	// /metrics endpoint. Guarded by the chart flag so clusters without the
+	// monitoring.coreos.com CRDs are never touched.
+	// ponytail: disabling the flag after enabling it leaves orphan PodMonitors
+	// until the Instance is deleted (owner-ref GC); upgrade path is a delete on
+	// the disabled branch once the CRD is known to be present.
+	if common.PodMonitorEnabled() {
+		if err := ensurePodMonitor(c); err != nil {
+			return err
+		}
+	}
+
+	// Publish the model externally when requested (LoadBalancer/NodePort).
+	// When the AI Gateway is enabled, it takes over external access and any
+	// previously created external Service is cleaned up.
+	var topo llm.LlmTopologyParameters
+	c.TryDecodeTopologyParameters(&topo)
+
+	if topo.UsesAIGateway() {
+		// Remove any legacy external Service (AI Gateway replaces it).
+		stale := &corev1.Service{ObjectMeta: c.ObjectMeta(externalServiceName(c.Name()))}
+		if err := c.Delete(stale); err != nil {
+			return err
+		}
+		comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
+		var params components.VllmCustomSpec
+		c.TryDecodeComponentParameters(comp, &params)
+		return syncAIGateway(c, servedModelName(c.Name(), params.ModelName), topo.TokenLimitPerHour)
+	}
+
+	// AI Gateway not enabled — clean up any leftover AI Gateway resources.
+	if common.AIGatewayEnabled() {
+		if err := cleanupAIGateway(c); err != nil {
+			return err
+		}
+	}
+
+	// Reconcile the external Service for LoadBalancer/NodePort.
 	return ensureExternalService(c)
 }
 
@@ -300,8 +359,13 @@ func (p *Provider) syncLLM(c *controller.Context) error {
 func ensureExternalService(c *controller.Context) error {
 	comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
 
+	var topo llm.LlmTopologyParameters
+	c.TryDecodeTopologyParameters(&topo)
+
 	svcType := corev1.ServiceTypeClusterIP
-	if comp.Service != nil && comp.Service.ServiceType != "" {
+	if resolved := topo.ResolvedServiceType(); resolved != "" {
+		svcType = resolved
+	} else if comp.Service != nil && comp.Service.ServiceType != "" {
 		svcType = comp.Service.ServiceType
 	}
 
@@ -351,11 +415,7 @@ func buildExternalService(c *controller.Context, spec *corev1alpha1.Service, svc
 }
 
 // ensureLLMConfig materializes the inline Advanced config
-// (llmEngine.parameters.config) as an Instance-owned LLMInferenceServiceConfig
-// in the Instance namespace. KServe resolves baseRefs from the llmisvc's own
-// namespace first, so a same-namespace config is inherited, and the owner
-// reference garbage-collects it with the Instance. No-op when no inline config
-// is set.
+// (llmEngine.parameters.config) as an Instance-owned LLMInferenceServiceConfig.
 func ensureLLMConfig(c *controller.Context) error {
 	comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
 
@@ -384,8 +444,7 @@ func modelPullerSAName(instance string) string {
 }
 
 // mirrorLimitsToRequests returns a copy of res whose Requests mirror any Limit
-// that lacks an explicit request, yielding a Guaranteed-QoS container. The
-// original ResourceRequirements maps are left untouched.
+// that lacks an explicit request, yielding a Guaranteed-QoS container.
 func mirrorLimitsToRequests(res corev1.ResourceRequirements) corev1.ResourceRequirements {
 	if len(res.Limits) == 0 {
 		return res
@@ -404,9 +463,7 @@ func mirrorLimitsToRequests(res corev1.ResourceRequirements) corev1.ResourceRequ
 }
 
 // ensureModelPullerServiceAccount creates/updates a ServiceAccount referencing
-// the configured HuggingFace token Secret. KServe's llmisvc storage path reads
-// the Secrets listed on the workload ServiceAccount and injects HF_TOKEN into
-// the storage-initializer, enabling gated model downloads.
+// the configured HuggingFace token Secret.
 func ensureModelPullerServiceAccount(c *controller.Context) error {
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: c.ObjectMeta(modelPullerSAName(c.Name())),
@@ -426,10 +483,24 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 
 	ready := llmisvc.Status.GetCondition(apis.ConditionReady)
 	if ready != nil && ready.IsTrue() {
-		// Surface connection details derived from however the model is exposed
-		// (gateway URL, external Service, or the in-cluster workload Service).
-		// While an external address is still settling (e.g. a LoadBalancer with
-		// no ingress IP yet), report Ready without details rather than blocking.
+		var topo llm.LlmTopologyParameters
+		c.TryDecodeTopologyParameters(&topo)
+
+		// When the AI Gateway is enabled, connection details come from the
+		// Gateway's external address rather than the direct workload URL.
+		if topo.UsesAIGateway() {
+			details, waiting, err := aiGatewayConnectionDetails(c)
+			if err != nil {
+				return controller.Status{}, err
+			}
+			if waiting != "" {
+				return controller.Provisioning(waiting), nil
+			}
+			return controller.ReadyWithConnectionDetails(details), nil
+		}
+
+		// Otherwise surface connection details from the external Service or
+		// direct KServe workload URL.
 		details, err := p.llmConnectionDetails(c, llmisvc)
 		if err != nil {
 			return controller.Provisioning(err.Error()), nil
@@ -440,18 +511,12 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 		return controller.Ready(), nil
 	}
 
-	// A not-ready LLMInferenceService is still progressing, not failed. KServe
-	// drives Ready through False during normal startup (e.g.
-	// MinimumReplicasUnavailable while the storage-initializer downloads the
-	// model), so surface it as Provisioning and let the condition message
-	// explain the current state rather than flipping the Instance to Failed.
 	return controller.Provisioning(conditionMessage(ready, "LLMInferenceService is being created")), nil
 }
 
 // llmConnectionDetails resolves how to reach a Ready model based on its expose
 // type. It returns nil (Ready without details) when an external address is
-// requested but not yet available, so the Instance does not stall waiting on a
-// pending LoadBalancer.
+// requested but not yet available.
 func (p *Provider) llmConnectionDetails(c *controller.Context, llmisvc *kservev1alpha2.LLMInferenceService) (*controller.ConnectionDetails, error) {
 	// Gateway API routing publishes an external URL directly on the status.
 	if llmisvc.Status.URL != nil {
@@ -460,8 +525,13 @@ func (p *Provider) llmConnectionDetails(c *controller.Context, llmisvc *kservev1
 	}
 
 	comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
+	var topo llm.LlmTopologyParameters
+	c.TryDecodeTopologyParameters(&topo)
+
 	svcType := corev1.ServiceTypeClusterIP
-	if comp.Service != nil && comp.Service.ServiceType != "" {
+	if resolved := topo.ResolvedServiceType(); resolved != "" {
+		svcType = resolved
+	} else if comp.Service != nil && comp.Service.ServiceType != "" {
 		svcType = comp.Service.ServiceType
 	}
 
@@ -519,8 +589,7 @@ func (p *Provider) externalServiceConnectionDetails(c *controller.Context, svcTy
 }
 
 // workloadServiceHost returns the in-cluster DNS name of the KServe workload
-// Service. It prefers the name KServe records in status, falling back to the
-// well-known naming pattern before the status is populated.
+// Service.
 func workloadServiceHost(c *controller.Context, llmisvc *kservev1alpha2.LLMInferenceService) string {
 	name := c.Name() + "-kserve-workload-svc"
 	if ws := llmisvc.Status.Workloads; ws != nil && ws.Service != nil && ws.Service.Name != "" {
@@ -529,9 +598,7 @@ func workloadServiceHost(c *controller.Context, llmisvc *kservev1alpha2.LLMInfer
 	return fmt.Sprintf("%s.%s.svc.cluster.local", name, c.Namespace())
 }
 
-// firstNodeAddress returns an address for reaching a NodePort Service, preferring
-// an external (routable) address and falling back to the internal one. Returns
-// empty when nodes cannot be listed or have no usable address.
+// firstNodeAddress returns an address for reaching a NodePort Service.
 func firstNodeAddress(c *controller.Context) string {
 	nodes := &corev1.NodeList{}
 	if err := c.List(nodes); err != nil {

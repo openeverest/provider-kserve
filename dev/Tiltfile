@@ -44,6 +44,11 @@ openeverest_version = os.getenv('OPENEVEREST_VERSION', '2.0.0-dev.1')
 openeverest_helm_repo = os.getenv(
     'OPENEVEREST_HELM_REPO', 'https://openeverest.github.io/helm-charts/')
 
+# OpenEverest git ref for CRDs not yet bundled in the published core chart.
+# release-2.0 includes the unified parametersSchema API
+# (https://github.com/openeverest/openeverest/pull/2583).
+openeverest_crd_branch = os.getenv('OPENEVEREST_BRANCH', 'release-2.0')
+
 # Namespaces.
 everest_namespace = os.getenv('EVEREST_NAMESPACE', 'everest-system')
 # The provider bundles the KServe controllers and the KServe runtime configs
@@ -55,6 +60,14 @@ provider_namespace = os.getenv('PROVIDER_NAMESPACE', 'default')
 
 # Whether to deploy MinIO + a BackupStorage CR for testing backups/restores.
 enable_minio = str2bool(os.getenv('ENABLE_MINIO', 'false'))
+
+# Whether to install Envoy AI Gateway and deploy the small CPU test Instance
+# from dev/resources/ai-gateway-llm.yaml.
+enable_ai_gateway = str2bool(os.getenv('ENABLE_AI_GATEWAY', 'false'))
+
+# Whether to install kube-prometheus-stack (Prometheus + Grafana) and provision
+# the vLLM Grafana dashboard so model metrics are visible end-to-end.
+enable_metrics = str2bool(os.getenv('ENABLE_METRICS', 'false'))
 
 # Whether to install cert-manager. The KServe controllers require it for their
 # admission-webhook certificates. Installed as its own release (rather than the
@@ -133,8 +146,45 @@ if install_openeverest:
         release_name='everest',
         namespace=everest_namespace,
         flags=core_flags,
-        port_forwards=[port_forward(8080, 8080, 'Everest UI/API')],
         resource_deps=['openeverest-repo'],
+        labels=['openeverest'],
+    )
+
+    # Keep the UI reachable at http://localhost:8080 while Tilt is running.
+    # helm_resource port_forwards often miss the everest Service; kubectl PF is reliable.
+    local_resource(
+        'everest-ui',
+        serve_cmd='kubectl port-forward svc/everest -n {0} 8080:8080'.format(
+            everest_namespace),
+        resource_deps=['openeverest'],
+        links=[link('http://localhost:8080', 'Everest UI (admin / admin)')],
+        labels=['openeverest'],
+    )
+
+    # Upgrade OpenEverest CRDs after core install. The published 2.0.0-dev.1
+    # chart still ships pre-#2583 schemas (customSpecSchema/configSchema); the
+    # provider emits parametersSchema and needs the release-2.0 CRDs.
+    openeverest_crd_base = 'https://raw.githubusercontent.com/openeverest/openeverest/{0}/config/crd/bases'.format(
+        openeverest_crd_branch)
+    openeverest_crd_files = [
+        'core.openeverest.io_providers.yaml',
+        'core.openeverest.io_instances.yaml',
+        'core.openeverest.io_instancepresets.yaml',
+        'monitoring.openeverest.io_monitoringconfigs.yaml',
+        'backup.openeverest.io_backupclasses.yaml',
+        'backup.openeverest.io_backups.yaml',
+        'backup.openeverest.io_restores.yaml',
+        'backup.openeverest.io_backupstorages.yaml',
+    ]
+    openeverest_crd_cmds = [
+        'kubectl apply --server-side --force-conflicts -f {0}/{1}'.format(
+            openeverest_crd_base, crd_file)
+        for crd_file in openeverest_crd_files
+    ]
+    local_resource(
+        'openeverest-crds',
+        ' && '.join(openeverest_crd_cmds),
+        resource_deps=['openeverest'],
         labels=['openeverest'],
     )
 
@@ -143,7 +193,7 @@ if install_openeverest:
 # ===========================
 local_resource(
     'provider-generate',
-    'make -C {0} generate'.format(provider_dir),
+    'make -C {0} manifests helm-sync-rbac'.format(provider_dir),
     deps=['{0}/definition'.format(provider_dir)],
     labels=['provider'],
 )
@@ -240,21 +290,35 @@ local_resource(
 
 provider_resource_deps = ['provider-build', 'provider-helm-deps']
 if install_openeverest:
-    provider_resource_deps = provider_resource_deps + ['openeverest']
+    provider_resource_deps = provider_resource_deps + ['openeverest', 'openeverest-crds']
 if install_cert_manager:
     provider_resource_deps = provider_resource_deps + ['cert-manager']
+
+provider_flags = [
+    '--create-namespace',
+    '--set', 'image.pullPolicy=IfNotPresent',
+    '--set', 'securityContext.readOnlyRootFilesystem=false',
+    # cert-manager is installed as its own release above.
+    '--set', 'cert-manager.enabled=false',
+    # Disable resources that trigger webhooks (ClusterServingRuntimes,
+    # LLMInferenceServiceConfigs). They will be applied after controllers are
+    # ready via the post-install resource below.
+    '--set', 'kserveRuntimeConfigs.enabled=false',
+    '--set', 'llmPresets.enabled=false',
+    '--set', 'cpuProfile.enabled=false',
+]
+if enable_ai_gateway:
+    provider_flags = provider_flags + [
+        '--set', 'aiGateway.enabled=true',
+        '--set', 'envoy-ai-gateway.envoyGateway.namespace={0}'.format(
+            provider_namespace),
+    ]
 
 helm_resource(
     'provider-kserve',
     chart_dir,
     namespace=provider_namespace,
-    flags=[
-        '--create-namespace',
-        '--set', 'image.pullPolicy=IfNotPresent',
-        '--set', 'securityContext.readOnlyRootFilesystem=false',
-        # cert-manager is installed as its own release above.
-        '--set', 'cert-manager.enabled=false',
-    ],
+    flags=provider_flags,
     image_deps=[provider_image],
     image_keys=[('image.repository', 'image.tag')],
     resource_deps=provider_resource_deps,
@@ -262,10 +326,62 @@ helm_resource(
 )
 
 # ===========================
+# Post-install: enable runtime configs after controllers are ready
+# ===========================
+# The KServe controllers register webhooks that validate ClusterServingRuntimes
+# and LLMInferenceServiceConfigs. On a fresh install the controllers aren't
+# ready yet, so those resources are disabled in the initial install and enabled
+# here once the webhook services have endpoints.
+post_install_cmd = ('echo "Waiting for KServe controllers to exist..." && ' +
+    'for i in $(seq 1 90); do kubectl get deployment/kserve-controller-manager -n {ns} >/dev/null 2>&1 && break; echo "Attempt $i: not found yet, sleeping 5s..."; sleep 5; done && ' +
+    'kubectl get deployment/kserve-controller-manager -n {ns} || (echo "ERROR: kserve-controller-manager never appeared" && exit 1) && ' +
+    'kubectl wait --for=condition=available deployment/kserve-controller-manager -n {ns} --timeout=300s && ' +
+    'kubectl wait --for=condition=available deployment/llmisvc-controller-manager -n {ns} --timeout=300s && ' +
+    'sleep 10 && ' +
+    # Preserve the image repository/tag injected by Tilt's helm_resource.
+    # Without --reuse-values this second upgrade resets the Deployment to the
+    # chart's default image, so an older provider reconciles away local changes.
+    'helm upgrade provider-kserve {chart} --namespace {ns} --reuse-values ' +
+    '--set image.pullPolicy=IfNotPresent ' +
+    '--set securityContext.readOnlyRootFilesystem=false ' +
+    '--set cert-manager.enabled=false ' +
+    '--set kserveRuntimeConfigs.enabled=true ' +
+    '--set llmPresets.enabled=true ' +
+    '--set cpuProfile.enabled=true').format(ns=provider_namespace, chart=chart_dir)
+
+if enable_ai_gateway:
+    post_install_cmd = post_install_cmd + ' --set aiGateway.enabled=true --set envoy-ai-gateway.envoyGateway.namespace={0}'.format(provider_namespace)
+
+local_resource(
+    'provider-kserve-post-install',
+    post_install_cmd,
+    resource_deps=['provider-kserve'],
+    labels=['provider'],
+)
+
+# ===========================
+# Envoy AI Gateway test model — optional
+# ===========================
+if enable_ai_gateway:
+    ai_gateway_llm_yaml = str(read_file(
+        '{0}/resources/ai-gateway-llm.yaml'.format(config.main_dir)))
+    ai_gateway_llm_yaml = ai_gateway_llm_yaml.replace(
+        '__NAMESPACE__', provider_namespace)
+    k8s_yaml(blob(ai_gateway_llm_yaml))
+    k8s_resource(
+        objects=[
+            'ai-gateway-smollm:instance:{0}'.format(provider_namespace),
+        ],
+        new_name='ai-gateway-test-model',
+        resource_deps=['provider-kserve'],
+        labels=['ai-gateway'],
+    )
+
+# ===========================
 # Backup storage (MinIO) — optional
 # ===========================
 if enable_minio:
-    k8s_yaml('{0}/dev/resources/minio.yaml'.format(config.main_dir))
+    k8s_yaml('{0}/resources/minio.yaml'.format(config.main_dir))
     k8s_resource(
         workload='minio',
         objects=['minio:namespace'],
@@ -275,8 +391,8 @@ if enable_minio:
 
     # Render the BackupStorage CR (+ credentials Secret) into the provider
     # namespace so the provider can be tested against it.
-    backupstorage_yaml = read_file('{0}/dev/resources/backupstorage.yaml'.format(
-        config.main_dir))
+    backupstorage_yaml = str(read_file('{0}/resources/backupstorage.yaml'.format(
+        config.main_dir)))
     backupstorage_yaml = backupstorage_yaml.replace(
         '__NAMESPACE__', provider_namespace)
     k8s_yaml(blob(backupstorage_yaml))
@@ -288,4 +404,61 @@ if enable_minio:
         new_name='backup-storage',
         resource_deps=['provider-kserve'],
         labels=['backup-storage'],
+    )
+
+# ===========================
+# Metrics: Prometheus + Grafana + vLLM dashboard — optional
+# ===========================
+# Installs kube-prometheus-stack (Prometheus Operator + Prometheus + Grafana),
+# provisions the vLLM dashboard, and port-forwards Grafana. The provider already
+# emits a PodMonitor per llm Instance (metrics.podMonitor.enabled defaults on),
+# so no provider flag is needed here — only a Prometheus that will read it.
+if enable_metrics:
+    helm_repo(
+        'prometheus-community',
+        'https://prometheus-community.github.io/helm-charts',
+        labels=['metrics'],
+    )
+    helm_resource(
+        'kube-prometheus-stack',
+        'prometheus-community/kube-prometheus-stack',
+        release_name='monitoring',
+        namespace='monitoring',
+        flags=[
+            '--create-namespace',
+            # Read ALL PodMonitors, not only those labeled release=monitoring.
+            # The provider's PodMonitor has no such label, so without this
+            # Prometheus would silently ignore it (the classic empty-dashboard
+            # gotcha). See docs/observability.md.
+            '--set', 'prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false',
+            '--set', 'prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false',
+        ],
+        resource_deps=['prometheus-community'],
+        labels=['metrics'],
+    )
+
+    # Provision docs/dashboards/vllm.json into Grafana via the sidecar: a
+    # ConfigMap labeled grafana_dashboard=1 in the monitoring namespace is
+    # auto-imported on Grafana startup (no manual upload).
+    local_resource(
+        'vllm-dashboard',
+        'kubectl create configmap vllm-dashboard -n monitoring ' +
+        '--from-file=vllm.json=' + provider_dir + '/docs/dashboards/vllm.json ' +
+        '--dry-run=client -o yaml | ' +
+        'kubectl label -f - --local -o yaml grafana_dashboard=1 | ' +
+        'kubectl apply -n monitoring -f -',
+        deps=[provider_dir + '/docs/dashboards/vllm.json'],
+        resource_deps=['kube-prometheus-stack'],
+        labels=['metrics'],
+    )
+
+    # Grafana is on Service port 80; forward it explicitly (reliable, unlike
+    # attaching to one of the stack's several pods). Default creds: admin /
+    # prom-operator.
+    local_resource(
+        'grafana',
+        serve_cmd='kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80',
+        resource_deps=['kube-prometheus-stack', 'vllm-dashboard'],
+        links=[link('http://localhost:3000', 'Grafana (admin / prom-operator)')],
+        labels=['metrics'],
     )
