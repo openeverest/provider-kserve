@@ -313,6 +313,13 @@ if enable_ai_gateway:
         '--set', 'envoy-ai-gateway.envoyGateway.namespace={0}'.format(
             provider_namespace),
     ]
+if enable_metrics:
+    # Labeled ConfigMaps for kube-prometheus-stack Grafana sidecar (see
+    # charts/provider-kserve/templates/grafana-dashboards.yaml).
+    provider_flags = provider_flags + [
+        '--set', 'metrics.grafanaDashboards.enabled=true',
+        '--set', 'metrics.grafanaDashboards.namespace=monitoring',
+    ]
 
 helm_resource(
     'provider-kserve',
@@ -351,6 +358,9 @@ post_install_cmd = ('echo "Waiting for KServe controllers to exist..." && ' +
 
 if enable_ai_gateway:
     post_install_cmd = post_install_cmd + ' --set aiGateway.enabled=true --set envoy-ai-gateway.envoyGateway.namespace={0}'.format(provider_namespace)
+
+if enable_metrics:
+    post_install_cmd = post_install_cmd + ' --set metrics.grafanaDashboards.enabled=true --set metrics.grafanaDashboards.namespace=monitoring'
 
 local_resource(
     'provider-kserve-post-install',
@@ -407,12 +417,12 @@ if enable_minio:
     )
 
 # ===========================
-# Metrics: Prometheus + Grafana + vLLM dashboard — optional
+# Metrics: Prometheus + Grafana + dashboard ConfigMaps — optional
 # ===========================
-# Installs kube-prometheus-stack (Prometheus Operator + Prometheus + Grafana),
-# provisions the vLLM dashboard, and port-forwards Grafana. The provider already
-# emits a PodMonitor per llm Instance (metrics.podMonitor.enabled defaults on),
-# so no provider flag is needed here — only a Prometheus that will read it.
+# Installs kube-prometheus-stack (Prometheus Operator + Prometheus + Grafana).
+# Dashboard JSON is provisioned via labeled ConfigMaps on the provider Helm
+# chart (metrics.grafanaDashboards.enabled=true when ENABLE_METRICS is set).
+# The provider emits PodMonitors; kube-prom Prometheus scrapes them.
 if enable_metrics:
     helm_repo(
         'prometheus-community',
@@ -437,28 +447,13 @@ if enable_metrics:
         labels=['metrics'],
     )
 
-    # Provision docs/dashboards/vllm.json into Grafana via the sidecar: a
-    # ConfigMap labeled grafana_dashboard=1 in the monitoring namespace is
-    # auto-imported on Grafana startup (no manual upload).
-    local_resource(
-        'vllm-dashboard',
-        'kubectl create configmap vllm-dashboard -n monitoring ' +
-        '--from-file=vllm.json=' + provider_dir + '/docs/dashboards/vllm.json ' +
-        '--dry-run=client -o yaml | ' +
-        'kubectl label -f - --local -o yaml grafana_dashboard=1 | ' +
-        'kubectl apply -n monitoring -f -',
-        deps=[provider_dir + '/docs/dashboards/vllm.json'],
-        resource_deps=['kube-prometheus-stack'],
-        labels=['metrics'],
-    )
-
     # Grafana is on Service port 80; forward it explicitly (reliable, unlike
     # attaching to one of the stack's several pods). Default creds: admin /
-    # prom-operator.
+    # prom-operator. Dashboard ConfigMaps come from provider-kserve Helm.
     local_resource(
         'grafana',
         serve_cmd='kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80',
-        resource_deps=['kube-prometheus-stack', 'vllm-dashboard'],
+        resource_deps=['kube-prometheus-stack', 'provider-kserve'],
         links=[link('http://localhost:3000', 'Grafana (admin / prom-operator)')],
         labels=['metrics'],
     )

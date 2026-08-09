@@ -74,6 +74,14 @@ helm-sync-rbac: yq ## Sync generated RBAC rules into the Helm chart.
 
 .PHONY: sync-crds
 sync-crds: ## Vendor the KServe CRDs into the chart's crds/ directory from $(KSERVE_CHARTS).
+	@if [ ! -f "$(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_inferenceservices.yaml" ]; then \
+		echo "KSERVE_CHARTS not found at $(KSERVE_CHARTS); keeping existing vendored CRDs in $(CHART_DIR)/crds/"; \
+		if [ -z "$$(ls -A $(CHART_DIR)/crds 2>/dev/null)" ]; then \
+			echo "ERROR: $(CHART_DIR)/crds/ is empty. Restore from git (git checkout -- $(CHART_DIR)/crds/) or clone KServe next to this repo."; \
+			exit 1; \
+		fi; \
+		exit 0; \
+	fi
 	@echo "Syncing KServe CRDs from $(KSERVE_CHARTS) into $(CHART_DIR)/crds/..."
 	@mkdir -p $(CHART_DIR)/crds
 	@rm -f $(CHART_DIR)/crds/serving.kserve.io_*.yaml
@@ -94,8 +102,15 @@ sync-llm-presets: ## Vendor the KServe LLM preset configs into the chart from $(
 	@cp $(KSERVE_CHARTS)/kserve-runtime-configs/files/llmisvcconfigs/resources.yaml $(CHART_DIR)/files/llmisvcconfigs/resources.yaml
 	@echo "Done."
 
+.PHONY: sync-dashboards
+sync-dashboards: ## Copy Grafana dashboard JSON from docs/ into the Helm chart.
+	@echo "Syncing Grafana dashboards from docs/dashboards/ into $(CHART_DIR)/files/dashboards/..."
+	@mkdir -p $(CHART_DIR)/files/dashboards
+	@cp docs/dashboards/vllm.json docs/dashboards/gateway.json $(CHART_DIR)/files/dashboards/
+	@echo "Done."
+
 .PHONY: generate
-generate: manifests helm-sync-rbac sync-crds sync-llm-presets ## Run all code generation (RBAC + Helm sync + CRDs + LLM presets + provider spec from definition/).
+generate: manifests helm-sync-rbac sync-crds sync-llm-presets sync-dashboards ## Run all code generation (RBAC + Helm sync + CRDs + LLM presets + provider spec from definition/).
 	go generate ./...
 	@echo "All generation complete."
 

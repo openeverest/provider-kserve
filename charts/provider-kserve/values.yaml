@@ -243,6 +243,23 @@ metrics:
     enabled: true
     # -- Scrape interval for the generated PodMonitor
     interval: 30s
+  grafanaDashboards:
+    # -- Create ConfigMaps labeled for kube-prometheus-stack's Grafana dashboard
+    # sidecar (grafana-sc-dashboard). Off by default: Grafana namespace and
+    # sidecar label conventions vary by platform. Enable when your cluster runs
+    # kube-prometheus-stack (or equivalent) and the sidecar watches
+    # metrics.grafanaDashboards.namespace. See docs/observability.md.
+    enabled: false
+    # -- Namespace where Grafana runs (ConfigMaps are created here, not in the
+    # provider release namespace).
+    namespace: monitoring
+    # -- Label key/value the Grafana dashboard sidecar watches (kube-prom default).
+    label: grafana_dashboard
+    labelValue: "1"
+    # -- Also provision docs/dashboards/gateway.json when aiGateway.enabled.
+    gateway: true
+    # -- Extra labels on dashboard ConfigMaps (optional).
+    extraLabels: {}
 
 # -- Additional environment variables to set on the provider container
 extraEnv: []

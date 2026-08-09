@@ -77,6 +77,8 @@ spec:
               type: boolean
             enableGatewayRouting:
               type: boolean
+            enableMetrics:
+              type: boolean
             enablePrefill:
               type: boolean
             externalAccess:
@@ -178,6 +180,24 @@ spec:
             - prefillReplicas
           description: Split prefill and decode into independently scaled deployments (llm-d pattern).
           label: Disaggregated Serving
+        observability:
+          components:
+            enableMetrics:
+              fieldParams:
+                defaultValue: "true"
+                helperText: Emits a PodMonitor for this instance's vLLM /metrics endpoint. Requires Prometheus Operator in the cluster.
+                label: vLLM Prometheus metrics
+                options:
+                  - label: Enabled
+                    value: "true"
+                  - label: Disabled
+                    value: "false"
+              path: spec.topology.parameters.enableMetrics
+              uiType: select
+          componentsOrder:
+            - enableMetrics
+          description: 'Configure Prometheus metrics for this model''s vLLM engine (per-instance PodMonitor). Envoy AI Gateway gen_ai metrics are cluster-wide: enabled automatically when the provider is installed with aiGateway.enabled and metrics.podMonitor.enabled — view them in Grafana (gateway dashboard).'
+          label: Observability
         routing:
           components:
             externalAccess:
@@ -302,6 +322,7 @@ spec:
         - runtime
         - routing
         - disaggregation
+        - observability
         - advanced
     predictor:
       sections:

@@ -18,3 +18,9 @@
 
 NOTE: Ensure that the following prerequisites are installed in your cluster:
   - OpenEverest CRDs (Instances, Providers)
+{{- if .Values.metrics.grafanaDashboards.enabled }}
+
+Grafana dashboards: ConfigMaps labeled {{ .Values.metrics.grafanaDashboards.label }}={{ .Values.metrics.grafanaDashboards.labelValue }} were created in namespace {{ .Values.metrics.grafanaDashboards.namespace }}.
+  Verify: kubectl get configmap -n {{ .Values.metrics.grafanaDashboards.namespace }} -l {{ .Values.metrics.grafanaDashboards.label }}={{ .Values.metrics.grafanaDashboards.labelValue }}
+  Requires kube-prometheus-stack (or Grafana with the kiwigrid dashboard sidecar watching that namespace).
+{{- end }}

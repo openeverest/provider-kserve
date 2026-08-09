@@ -1,5 +1,8 @@
 # Envoy AI Gateway metrics
 
+> **Context:** See [observability-overview.md](observability-overview.md) for how
+> gateway metrics relate to vLLM metrics and Grafana.
+
 The Envoy AI Gateway (enabled with `aiGateway.enabled`) exposes GenAI metrics
 for every request that enters the system: per-model token usage (cost basis),
 request duration, TTFT, and TPOT. This is the front-door view; vLLM pod metrics
@@ -62,6 +65,13 @@ sum by (gen_ai_request_model) (
 
 [`docs/dashboards/gateway.json`](dashboards/gateway.json) — token rate by model
 and type, request rate, TTFT, TPOT, request duration, total tokens per model.
+
+**Helm:** with `metrics.grafanaDashboards.enabled=true` and `aiGateway.enabled`,
+the chart creates a labeled ConfigMap in `metrics.grafanaDashboards.namespace`
+for the Grafana dashboard sidecar. See [observability.md](observability.md).
+
+**Manual:** Grafana → Import → upload `gateway.json`, or use the kubectl
+ConfigMap one-liner in [observability.md](observability.md).
 
 ## References
 
