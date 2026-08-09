@@ -110,7 +110,7 @@ sync-dashboards: ## Copy Grafana dashboard JSON from docs/ into the Helm chart.
 	@echo "Done."
 
 .PHONY: generate
-generate: manifests helm-sync-rbac sync-crds sync-llm-presets sync-dashboards ## Run all code generation (RBAC + Helm sync + CRDs + LLM presets + provider spec from definition/).
+generate: manifests helm-sync-rbac sync-crds sync-llm-presets sync-dashboards ## Run all code generation (RBAC + Helm sync + CRDs + LLM presets + dashboards + provider spec from definition/).
 	go generate ./...
 	@echo "All generation complete."
 
