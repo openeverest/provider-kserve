@@ -70,18 +70,13 @@ func buildPodMonitor(
 	return pm
 }
 
-// ensurePodMonitor reconciles the PodMonitor for the llm workload pods.
-//
-// Because metrics default on, a target cluster may not have the Prometheus
-// Operator (monitoring.coreos.com) CRDs installed. That is treated as a no-op
-// rather than an error, so enabling metrics never breaks a bare cluster; the
-// operator/CRDs can be installed later and the next reconcile will emit it.
-func ensurePodMonitor(c *controller.Context) error {
-	return applyPodMonitor(c)
-}
-
 // syncPodMonitor creates or removes the per-Instance vLLM PodMonitor based on
 // the chart-level and instance-level enable flags.
+//
+// A target cluster may not have the Prometheus Operator (monitoring.coreos.com)
+// CRDs installed. applyPodMonitor treats that as a no-op rather than an error,
+// so enabling metrics never breaks a bare cluster; install the CRDs later and
+// the next reconcile will emit the PodMonitor.
 func syncPodMonitor(c *controller.Context, topo llm.LlmTopologyParameters) error {
 	if !common.PodMonitorEnabled() || !topo.MetricsEnabled() {
 		return deletePodMonitor(c)
