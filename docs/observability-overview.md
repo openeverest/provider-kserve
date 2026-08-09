@@ -38,7 +38,7 @@ door).
 
 ---
 
-## Three knobs (do not mix them up)
+## Four knobs (do not mix them up)
 
 ### 1. Chart: `metrics.podMonitor.enabled` (provider Helm)
 
