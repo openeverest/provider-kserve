@@ -55,6 +55,18 @@ type LlmTopologyParameters struct {
 	// PrefillReplicas sets the number of replicas for the prefill workload.
 	// Only used when EnablePrefill is true.
 	PrefillReplicas *int32 `json:"prefillReplicas,omitempty"`
+
+	// EnableMetrics emits a Prometheus Operator PodMonitor for this instance's
+	// vLLM pods (/metrics). Nil/unset defaults to true for backward compatibility.
+	EnableMetrics *bool `json:"enableMetrics,omitempty"`
+}
+
+// MetricsEnabled reports whether this instance should emit a vLLM PodMonitor.
+func (t LlmTopologyParameters) MetricsEnabled() bool {
+	if t.EnableMetrics == nil {
+		return true
+	}
+	return *t.EnableMetrics
 }
 
 // UsesAIGateway reports whether this instance should register on the shared
@@ -122,7 +134,22 @@ func (t *LlmTopologyParameters) UnmarshalJSON(data []byte) error {
 	if t.EnablePrefill, err = unmarshalBoolFlag(raw, "enablePrefill"); err != nil {
 		return err
 	}
+	if t.EnableMetrics, err = unmarshalOptionalBoolFlag(raw, "enableMetrics"); err != nil {
+		return err
+	}
 	return nil
+}
+
+func unmarshalOptionalBoolFlag(raw map[string]json.RawMessage, key string) (*bool, error) {
+	v, ok := raw[key]
+	if !ok || string(v) == "null" {
+		return nil, nil
+	}
+	b, err := unmarshalBoolFlag(raw, key)
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
 }
 
 func unmarshalBoolFlag(raw map[string]json.RawMessage, key string) (bool, error) {

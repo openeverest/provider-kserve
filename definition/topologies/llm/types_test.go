@@ -28,6 +28,17 @@ func TestUsesAIGateway(t *testing.T) {
 	}
 }
 
+func TestMetricsEnabled(t *testing.T) {
+	t.Parallel()
+	if !(LlmTopologyParameters{}).MetricsEnabled() {
+		t.Fatal("nil enableMetrics should default true")
+	}
+	falseVal := false
+	if (LlmTopologyParameters{EnableMetrics: &falseVal}).MetricsEnabled() {
+		t.Fatal("explicit false should disable")
+	}
+}
+
 func TestResolvedServiceType(t *testing.T) {
 	t.Parallel()
 	if got := (LlmTopologyParameters{ExternalAccess: ExternalAccessLoadBalancer}).ResolvedServiceType(); got != corev1.ServiceTypeLoadBalancer {

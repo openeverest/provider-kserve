@@ -1,5 +1,8 @@
 # Observability
 
+> **New here?** Read [observability-overview.md](observability-overview.md) first
+> for the mental model (provider vs Prometheus vs Grafana, vLLM vs gateway).
+
 This provider makes its LLM model workloads **discoverable** by a Prometheus
 that already exists in the cluster. It ships **no** monitoring stack (no
 Prometheus, no Grafana) and adds **no** metric-aggregation code — vLLM already
@@ -179,8 +182,23 @@ from the `namespace` and `model_name` labels).
 **Import:** Grafana → Dashboards → New → Import → upload `vllm.json` → pick your
 Prometheus data source.
 
-**Provision automatically** (kube-prometheus-stack / Grafana sidecar) by wrapping
-it in a labeled ConfigMap:
+**Provision via Helm (recommended for prod with kube-prometheus-stack):** enable
+labeled dashboard ConfigMaps on the provider chart. The Grafana dashboard
+sidecar (`grafana-sc-dashboard`) watches ConfigMaps with label
+`grafana_dashboard=1` and auto-imports them:
+
+```bash
+helm upgrade --install provider-kserve ./charts/provider-kserve \
+  --set metrics.grafanaDashboards.enabled=true \
+  --set metrics.grafanaDashboards.namespace=monitoring
+```
+
+With AI Gateway, also set `aiGateway.enabled=true` (gateway dashboard is included
+when `metrics.grafanaDashboards.gateway` is true, the default). Adjust
+`metrics.grafanaDashboards.namespace` and label fields if your platform uses
+different conventions.
+
+**Provision manually** (same sidecar mechanism, without Helm):
 
 ```bash
 kubectl create configmap vllm-dashboard \

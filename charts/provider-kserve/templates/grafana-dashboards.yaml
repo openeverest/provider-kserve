@@ -1,0 +1,44 @@
+{{- if .Values.metrics.grafanaDashboards.enabled }}
+{{- /*
+Labeled ConfigMaps for kube-prometheus-stack's Grafana dashboard sidecar
+(kiwigrid/k8s-sidecar). The sidecar watches ConfigMaps with label
+grafana_dashboard=1 and writes JSON into Grafana's provisioning folder.
+
+Rendered in metrics.grafanaDashboards.namespace (not the release namespace)
+so they land where platform Grafana runs. Requires a cluster admin Helm install
+(or equivalent RBAC) to create ConfigMaps across namespaces.
+
+See docs/observability.md — "Provision automatically".
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "provider-kserve.fullname" . }}-vllm-dashboard
+  namespace: {{ .Values.metrics.grafanaDashboards.namespace }}
+  labels:
+    {{ .Values.metrics.grafanaDashboards.label }}: {{ .Values.metrics.grafanaDashboards.labelValue | quote }}
+    {{- include "provider-kserve.labels" . | nindent 4 }}
+    {{- with .Values.metrics.grafanaDashboards.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+data:
+  vllm.json: |
+{{ .Files.Get "files/dashboards/vllm.json" | indent 4 }}
+{{- if and .Values.aiGateway.enabled .Values.metrics.grafanaDashboards.gateway }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "provider-kserve.fullname" . }}-gateway-dashboard
+  namespace: {{ .Values.metrics.grafanaDashboards.namespace }}
+  labels:
+    {{ .Values.metrics.grafanaDashboards.label }}: {{ .Values.metrics.grafanaDashboards.labelValue | quote }}
+    {{- include "provider-kserve.labels" . | nindent 4 }}
+    {{- with .Values.metrics.grafanaDashboards.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+data:
+  gateway.json: |
+{{ .Files.Get "files/dashboards/gateway.json" | indent 4 }}
+{{- end }}
+{{- end }}

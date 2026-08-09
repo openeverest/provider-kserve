@@ -5,9 +5,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	knativekmeta "knative.dev/pkg/kmeta"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
+	"github.com/openeverest/provider-kserve/definition/topologies/llm"
 
 	"github.com/openeverest/provider-kserve/internal/common"
 )
@@ -68,13 +70,21 @@ func buildPodMonitor(
 	return pm
 }
 
-// ensurePodMonitor reconciles the PodMonitor for the llm workload pods.
+// syncPodMonitor creates or removes the per-Instance vLLM PodMonitor based on
+// the chart-level and instance-level enable flags.
 //
-// Because metrics default on, a target cluster may not have the Prometheus
-// Operator (monitoring.coreos.com) CRDs installed. That is treated as a no-op
-// rather than an error, so enabling metrics never breaks a bare cluster; the
-// operator/CRDs can be installed later and the next reconcile will emit it.
-func ensurePodMonitor(c *controller.Context) error {
+// A target cluster may not have the Prometheus Operator (monitoring.coreos.com)
+// CRDs installed. applyPodMonitor treats that as a no-op rather than an error,
+// so enabling metrics never breaks a bare cluster; install the CRDs later and
+// the next reconcile will emit the PodMonitor.
+func syncPodMonitor(c *controller.Context, topo llm.LlmTopologyParameters) error {
+	if !common.PodMonitorEnabled() || !topo.MetricsEnabled() {
+		return deletePodMonitor(c)
+	}
+	return applyPodMonitor(c)
+}
+
+func applyPodMonitor(c *controller.Context) error {
 	pm := buildPodMonitor(
 		c.Name(),
 		c.Instance().Namespace,
@@ -92,6 +102,20 @@ func ensurePodMonitor(c *controller.Context) error {
 			return nil
 		}
 		return err
+	}
+	return nil
+}
+
+func deletePodMonitor(c *controller.Context) error {
+	pm := &unstructured.Unstructured{}
+	pm.SetGroupVersionKind(podMonitorGVK)
+	pm.SetName(knativekmeta.ChildName(c.Name(), podMonitorSuffix))
+	pm.SetNamespace(c.Instance().Namespace)
+	if err := c.Delete(pm); err != nil {
+		if meta.IsNoMatchError(err) {
+			return nil
+		}
+		return client.IgnoreNotFound(err)
 	}
 	return nil
 }
