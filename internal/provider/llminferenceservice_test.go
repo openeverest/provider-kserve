@@ -41,7 +41,10 @@ func TestBuildModelLoRA(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got == nil || len(got.Adapters) != 2 {
+		if got == nil {
+			t.Fatal("expected non-nil LoRA spec")
+		}
+		if len(got.Adapters) != 2 {
 			t.Fatalf("adapters = %d, want 2", len(got.Adapters))
 		}
 		if got.MaxRank == nil || *got.MaxRank != 32 {
