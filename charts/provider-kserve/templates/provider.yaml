@@ -21,9 +21,14 @@ metadata:
 {{- $label := ternary (printf "%s (gated)" .label) .label (default false .gated) }}
 {{- $catalog = append $catalog (dict "label" $label "uri" .uri) }}
 {{- end }}
+{{- $loraCatalog := list }}
+{{- range .Values.loraAdapters }}
+{{- $loraCatalog = append $loraCatalog (dict "label" .label "name" .name "uri" .uri) }}
+{{- end }}
 {{- $uiSchema := default (dict) $spec.uiSchema }}
 {{- $llm := default (dict) (index $uiSchema "llm") }}
 {{- $_ := set $llm "modelCatalog" $catalog }}
+{{- $_ := set $llm "loraCatalog" $loraCatalog }}
 {{- $_ := set $uiSchema "llm" $llm }}
 {{- $_ := set $spec "uiSchema" $uiSchema }}
 spec:

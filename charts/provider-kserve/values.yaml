@@ -216,6 +216,30 @@ models:
     gated: true
 
 # ---------------------------------------------------------------------------
+# LoRA adapter catalog (operator-managed).
+#
+# This list is rendered into the Provider CR (spec.uiSchema.llm.loraCatalog) and
+# surfaced in the Adapter 1–3 dropdowns when LoRA deployment is enabled. Edit it
+# to add, remove, or reorder adapters — changes take effect on helm upgrade,
+# no regeneration needed. Each entry:
+#   label: display name shown in the UI
+#   name:  served model name in OpenAI requests (must differ from base model)
+#   uri:   adapter weights (hf://..., s3://..., pvc://...)
+#
+# Pair adapters with a compatible base model from the models list above.
+loraAdapters:
+  # --- Tiny, CPU-friendly ungated adapters (pair with matching base models) ---
+  - label: "SmolLM2 135M SFT LoRA (SmolLM2-135M base)"
+    name: smollm2-135m-sft
+    uri: "hf://Premchan369/smollm2-135m-sft-lora"
+  - label: "Qwen2.5 0.5B SFT LoRA (Qwen2.5-0.5B base)"
+    name: qwen2.5-0.5b-sft
+    uri: "hf://lewtun/Qwen2.5-0.5B-SFT-LoRA"
+  - label: "Qwen2.5 0.5B Maestro LoRA (Qwen2.5-0.5B-Instruct base)"
+    name: qwen2.5-0.5b-maestro
+    uri: "hf://umsa-v1/maestro_Qwen2.5_0.5B_grupo1"
+
+# ---------------------------------------------------------------------------
 # HuggingFace access for gated models.
 #
 # Gated models (e.g. Llama, Mistral, Gemma) require a HuggingFace token. Create

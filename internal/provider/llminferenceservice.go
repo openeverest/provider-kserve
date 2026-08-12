@@ -119,7 +119,174 @@ func validateLLM(c *controller.Context) error {
 			return fmt.Errorf("tokenLimitPerHour must be greater than zero")
 		}
 	}
+	return validateLoRAParams(c.Name(), params)
+}
+
+// validateLoRAParams checks llmEngine LoRA settings before sync.
+func validateLoRAParams(instanceName string, params components.VllmCustomSpec) error {
+	if err := validateLoRASlots(params); err != nil {
+		return err
+	}
+
+	adapters, err := resolvedLoRAAdapters(params)
+	if err != nil {
+		return err
+	}
+	if len(adapters) == 0 {
+		return nil
+	}
+
+	baseName := servedModelName(instanceName, params.ModelName)
+	seen := make(map[string]int, len(adapters))
+
+	for i, adapter := range adapters {
+		path := fmt.Sprintf("%s.parameters.lora.adapters[%d]", common.ComponentLlmEngine, i)
+		name := strings.TrimSpace(adapter.Name)
+		if name == "" {
+			return fmt.Errorf("%s.name is required", path)
+		}
+		if name == "." || name == ".." {
+			return fmt.Errorf("%s.name %q is not a valid adapter name", path, name)
+		}
+		if name == baseName {
+			return fmt.Errorf("%s.name %q must differ from the base served model name %q", path, name, baseName)
+		}
+		if prev, ok := seen[name]; ok {
+			return fmt.Errorf("%s.name %q duplicates adapters[%d].name", path, name, prev)
+		}
+		seen[name] = i
+
+		if strings.TrimSpace(adapter.URI) == "" {
+			return fmt.Errorf("%s.uri is required", path)
+		}
+		if _, err := apis.ParseURL(adapter.URI); err != nil {
+			return fmt.Errorf("invalid %s.uri %q: %w", path, adapter.URI, err)
+		}
+	}
+
+	if params.LoRA != nil {
+		if params.LoRA.MaxRank != nil && *params.LoRA.MaxRank < 1 {
+			return fmt.Errorf("%s.parameters.lora.maxRank must be at least 1", common.ComponentLlmEngine)
+		}
+		if params.LoRA.MaxAdapters != nil && *params.LoRA.MaxAdapters < 1 {
+			return fmt.Errorf("%s.parameters.lora.maxAdapters must be at least 1", common.ComponentLlmEngine)
+		}
+		if params.LoRA.MaxCpuAdapters != nil && *params.LoRA.MaxCpuAdapters < 1 {
+			return fmt.Errorf("%s.parameters.lora.maxCpuAdapters must be at least 1", common.ComponentLlmEngine)
+		}
+	}
+
+	if params.DisableStorageInitializer != nil && *params.DisableStorageInitializer {
+		for i, adapter := range adapters {
+			schema, _, ok := strings.Cut(adapter.URI, "://")
+			if !ok {
+				continue
+			}
+			switch schema + "://" {
+			case "hf://", "s3://":
+				return fmt.Errorf("%s.parameters.lora.adapters[%d] uses %s which requires the storage initializer; set disableStorageInitializer to false", common.ComponentLlmEngine, i, schema+"://")
+			}
+		}
+	}
 	return nil
+}
+
+func validateLoRASlots(params components.VllmCustomSpec) error {
+	switch strings.TrimSpace(params.LoraDeployment) {
+	case "", components.LoraDeploymentDisabled:
+		return nil
+	case components.LoraDeploymentEnabled:
+		// continue
+	default:
+		return fmt.Errorf("%s.parameters.loraDeployment must be %q or %q", common.ComponentLlmEngine, components.LoraDeploymentDisabled, components.LoraDeploymentEnabled)
+	}
+	slots := loraSlotNames(params)
+	if len(slots) == 0 {
+		return fmt.Errorf("%s.parameters.loraDeployment enabled requires at least one adapter slot", common.ComponentLlmEngine)
+	}
+	seen := make(map[string]string, len(slots))
+	for _, item := range []struct {
+		field string
+		name  string
+	}{
+		{"loraSlot1", params.LoraSlot1},
+		{"loraSlot2", params.LoraSlot2},
+		{"loraSlot3", params.LoraSlot3},
+	} {
+		name := strings.TrimSpace(item.name)
+		if name == "" {
+			continue
+		}
+		if prev, ok := seen[name]; ok {
+			return fmt.Errorf("%s.parameters.%s and %s both select adapter %q", common.ComponentLlmEngine, prev, item.field, name)
+		}
+		seen[name] = item.field
+		if _, ok := common.LookupLoRAAdapter(name); !ok {
+			return fmt.Errorf("%s.parameters.%s references unknown adapter %q (add it to chart loraAdapters)", common.ComponentLlmEngine, item.field, name)
+		}
+	}
+	return nil
+}
+
+func loraSlotNames(params components.VllmCustomSpec) []string {
+	var slots []string
+	for _, slot := range []string{params.LoraSlot1, params.LoraSlot2, params.LoraSlot3} {
+		if name := strings.TrimSpace(slot); name != "" {
+			slots = append(slots, name)
+		}
+	}
+	return slots
+}
+
+// resolvedLoRAAdapters returns adapters from UI catalog slots or explicit lora.adapters YAML.
+func resolvedLoRAAdapters(params components.VllmCustomSpec) ([]components.LoRAAdapterSpec, error) {
+	if params.LoraDeployment == components.LoraDeploymentEnabled {
+		var adapters []components.LoRAAdapterSpec
+		for _, name := range loraSlotNames(params) {
+			entry, ok := common.LookupLoRAAdapter(name)
+			if !ok {
+				return nil, fmt.Errorf("unknown lora adapter %q (not in chart loraAdapters catalog)", name)
+			}
+			adapters = append(adapters, components.LoRAAdapterSpec{Name: entry.Name, URI: entry.URI})
+		}
+		return adapters, nil
+	}
+	if params.LoRA != nil {
+		return params.LoRA.Adapters, nil
+	}
+	return nil, nil
+}
+
+// buildModelLoRA maps provider LoRA parameters onto LLMInferenceService.spec.model.lora.
+func buildModelLoRA(params components.VllmCustomSpec) (*kservev1alpha2.LoRASpec, error) {
+	adapters, err := resolvedLoRAAdapters(params)
+	if err != nil {
+		return nil, err
+	}
+	if len(adapters) == 0 {
+		return nil, nil
+	}
+
+	out := &kservev1alpha2.LoRASpec{
+		Adapters: make([]kservev1alpha2.LLMModelSpec, 0, len(adapters)),
+	}
+	if params.LoRA != nil {
+		out.MaxRank = params.LoRA.MaxRank
+		out.MaxAdapters = params.LoRA.MaxAdapters
+		out.MaxCpuAdapters = params.LoRA.MaxCpuAdapters
+	}
+
+	for _, adapter := range adapters {
+		uri, err := apis.ParseURL(adapter.URI)
+		if err != nil {
+			return nil, fmt.Errorf("invalid lora adapter URI %q: %w", adapter.URI, err)
+		}
+		out.Adapters = append(out.Adapters, kservev1alpha2.LLMModelSpec{
+			Name: ptr.To(strings.TrimSpace(adapter.Name)),
+			URI:  *uri,
+		})
+	}
+	return out, nil
 }
 
 // parseLLMConfigSpec decodes the inline Advanced config (YAML spec body) into an
@@ -188,6 +355,12 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		Model: kservev1alpha2.LLMModelSpec{URI: *uri},
 	}
 	spec.Model.Name = ptr.To(servedModelName(c.Name(), params.ModelName))
+
+	lora, err := buildModelLoRA(params)
+	if err != nil {
+		return nil, err
+	}
+	spec.Model.LoRA = lora
 
 	// Static replicas from the component spec.
 	if comp.Replicas != nil {
