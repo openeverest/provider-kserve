@@ -192,8 +192,13 @@ func validateLoRAParams(instanceName string, params components.VllmCustomSpec) e
 }
 
 func validateLoRASlots(params components.VllmCustomSpec) error {
-	if params.LoraDeployment != components.LoraDeploymentEnabled {
+	switch strings.TrimSpace(params.LoraDeployment) {
+	case "", components.LoraDeploymentDisabled:
 		return nil
+	case components.LoraDeploymentEnabled:
+		// continue
+	default:
+		return fmt.Errorf("%s.parameters.loraDeployment must be %q or %q", common.ComponentLlmEngine, components.LoraDeploymentDisabled, components.LoraDeploymentEnabled)
 	}
 	slots := loraSlotNames(params)
 	if len(slots) == 0 {
