@@ -16,7 +16,7 @@ type LoRACatalogEntry struct {
 }
 
 var (
-	loraCatalogOnce sync.Once
+	loraCatalogOnce   sync.Once
 	loraCatalogByName map[string]LoRACatalogEntry
 )
 
