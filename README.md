@@ -352,6 +352,33 @@ SmolLM2 135M/360M, Qwen2.5 0.5B, and TinyLlama 1.1B) plus common gated models.
 > node (not a top-level `uiSchema` key) so it is not enumerated as a selectable topology in
 > the UI's topology dropdown.
 
+### LoRA adapter catalog
+
+When **LoRA deployment** is enabled in the `llm` wizard, adapter slots are populated from
+`.Values.loraAdapters`, rendered into `spec.uiSchema.llm.loraCatalog` on the `Provider` CR,
+and passed to the provider pod as `LORA_ADAPTER_CATALOG` for validation at reconcile time.
+
+```yaml
+# values.yaml
+loraAdapters:
+  - label: "SQL assistant"              # shown in the slot dropdown
+    name: sql-lora                        # OpenAI `model` field in requests
+    uri: "hf://my-org/sql-lora-adapter"
+  - label: "Code style"
+    name: code-style
+    uri: "s3://my-bucket/adapters/code-style"
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `label` | string | Display name in the UI slot picker. |
+| `name` | string | Served adapter name (must differ from the base model name). |
+| `uri` | string | Adapter weights location (`hf://`, `s3://`, `pvc://`, …). |
+
+The default catalog ships a few tiny public HuggingFace LoRA adapters paired with
+models in the model list (SmolLM2-135M, Qwen2.5-0.5B). Replace with your own
+adapters for production.
+
 #### Gated models (HuggingFace token)
 
 Gated models (Llama, Mistral, Gemma, …) require a HuggingFace token and prior access approval.

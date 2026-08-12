@@ -77,23 +77,23 @@ sync-crds: ## Vendor the KServe CRDs into the chart's crds/ directory from $(KSE
 	@if [ ! -f "$(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_inferenceservices.yaml" ]; then \
 		echo "KSERVE_CHARTS not found at $(KSERVE_CHARTS); keeping existing vendored CRDs in $(CHART_DIR)/crds/"; \
 		if [ -z "$$(ls -A $(CHART_DIR)/crds 2>/dev/null)" ]; then \
-			echo "ERROR: $(CHART_DIR)/crds/ is empty. Restore from git (git checkout -- $(CHART_DIR)/crds/) or clone KServe next to this repo."; \
+			echo "ERROR: $(CHART_DIR)/crds/ is empty. Restore from git or clone KServe next to this repo."; \
 			exit 1; \
 		fi; \
-		exit 0; \
+	else \
+		echo "Syncing KServe CRDs from $(KSERVE_CHARTS) into $(CHART_DIR)/crds/..."; \
+		mkdir -p $(CHART_DIR)/crds; \
+		rm -f $(CHART_DIR)/crds/serving.kserve.io_*.yaml; \
+		cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_inferenceservices.yaml $(CHART_DIR)/crds/; \
+		cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_servingruntimes.yaml $(CHART_DIR)/crds/; \
+		cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_clusterservingruntimes.yaml $(CHART_DIR)/crds/; \
+		cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_inferencegraphs.yaml $(CHART_DIR)/crds/; \
+		cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_trainedmodels.yaml $(CHART_DIR)/crds/; \
+		cp $(KSERVE_CHARTS)/kserve-crd/files/serving.kserve.io_clusterstoragecontainers.yaml $(CHART_DIR)/crds/; \
+		cp $(KSERVE_CHARTS)/kserve-llmisvc-crd/templates/serving.kserve.io_llminferenceservices.yaml $(CHART_DIR)/crds/; \
+		cp $(KSERVE_CHARTS)/kserve-llmisvc-crd/templates/serving.kserve.io_llminferenceserviceconfigs.yaml $(CHART_DIR)/crds/; \
+		echo "Done."; \
 	fi
-	@echo "Syncing KServe CRDs from $(KSERVE_CHARTS) into $(CHART_DIR)/crds/..."
-	@mkdir -p $(CHART_DIR)/crds
-	@rm -f $(CHART_DIR)/crds/serving.kserve.io_*.yaml
-	@cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_inferenceservices.yaml $(CHART_DIR)/crds/
-	@cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_servingruntimes.yaml $(CHART_DIR)/crds/
-	@cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_clusterservingruntimes.yaml $(CHART_DIR)/crds/
-	@cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_inferencegraphs.yaml $(CHART_DIR)/crds/
-	@cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_trainedmodels.yaml $(CHART_DIR)/crds/
-	@cp $(KSERVE_CHARTS)/kserve-crd/files/serving.kserve.io_clusterstoragecontainers.yaml $(CHART_DIR)/crds/
-	@cp $(KSERVE_CHARTS)/kserve-llmisvc-crd/templates/serving.kserve.io_llminferenceservices.yaml $(CHART_DIR)/crds/
-	@cp $(KSERVE_CHARTS)/kserve-llmisvc-crd/templates/serving.kserve.io_llminferenceserviceconfigs.yaml $(CHART_DIR)/crds/
-	@echo "Done."
 
 .PHONY: sync-llm-presets
 sync-llm-presets: ## Vendor the KServe LLM preset configs into the chart from $(KSERVE_CHARTS).

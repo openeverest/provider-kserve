@@ -34,6 +34,35 @@ spec:
             kvCacheSpaceGi:
               format: int32
               type: integer
+            lora:
+              properties:
+                adapters:
+                  items:
+                    properties:
+                      name:
+                        type: string
+                      uri:
+                        type: string
+                    type: object
+                  type: array
+                maxAdapters:
+                  format: int32
+                  type: integer
+                maxCpuAdapters:
+                  format: int32
+                  type: integer
+                maxRank:
+                  format: int32
+                  type: integer
+              type: object
+            loraDeployment:
+              type: string
+            loraSlot1:
+              type: string
+            loraSlot2:
+              type: string
+            loraSlot3:
+              type: string
             modelName:
               type: string
             modelURI:
@@ -180,6 +209,87 @@ spec:
             - prefillReplicas
           description: Split prefill and decode into independently scaled deployments (llm-d pattern).
           label: Disaggregated Serving
+        lora:
+          components:
+            loraDeployment:
+              fieldParams:
+                defaultValue: disabled
+                label: LoRA deployment
+                options:
+                  - label: Base model only
+                    value: disabled
+                  - label: Base + LoRA adapters
+                    value: enabled
+              path: spec.components.llmEngine.parameters.loraDeployment
+              uiType: select
+            loraSlot1:
+              fieldParams:
+                displayEmpty: true
+                helperText: Optional. Served model name comes from the catalog entry.
+                label: Adapter 1
+                optionsPath: spec.uiSchema.llm.loraCatalog
+                optionsPathConfig:
+                  labelPath: label
+                  valuePath: name
+              path: spec.components.llmEngine.parameters.loraSlot1
+              uiType: select
+            loraSlot2:
+              fieldParams:
+                displayEmpty: true
+                label: Adapter 2
+                optionsPath: spec.uiSchema.llm.loraCatalog
+                optionsPathConfig:
+                  labelPath: label
+                  valuePath: name
+              path: spec.components.llmEngine.parameters.loraSlot2
+              uiType: select
+            loraSlot3:
+              fieldParams:
+                displayEmpty: true
+                label: Adapter 3
+                optionsPath: spec.uiSchema.llm.loraCatalog
+                optionsPathConfig:
+                  labelPath: label
+                  valuePath: name
+              path: spec.components.llmEngine.parameters.loraSlot3
+              uiType: select
+            maxAdapters:
+              fieldParams:
+                helperText: Maps to vLLM --max-loras
+                label: Max Loaded Adapters
+                placeholder: Defaults to adapter count
+              path: spec.components.llmEngine.parameters.lora.maxAdapters
+              uiType: number
+              validation:
+                min: 1
+            maxCpuAdapters:
+              fieldParams:
+                helperText: Maps to vLLM --max-cpu-loras
+                label: Max CPU-resident Adapters
+                placeholder: Defaults to adapter count
+              path: spec.components.llmEngine.parameters.lora.maxCpuAdapters
+              uiType: number
+              validation:
+                min: 1
+            maxRank:
+              fieldParams:
+                helperText: Maps to vLLM --max-lora-rank
+                label: Max LoRA Rank
+                placeholder: vLLM default (16)
+              path: spec.components.llmEngine.parameters.lora.maxRank
+              uiType: number
+              validation:
+                min: 1
+          componentsOrder:
+            - loraDeployment
+            - loraSlot1
+            - loraSlot2
+            - loraSlot3
+            - maxRank
+            - maxAdapters
+            - maxCpuAdapters
+          description: Serve LoRA fine-tunes on top of the base model. Each adapter is addressable by name in OpenAI requests (model field). Adapters are chosen from the operator catalog (chart loraAdapters); up to three per Instance.
+          label: LoRA Adapters
         observability:
           components:
             enableMetrics:
@@ -320,6 +430,7 @@ spec:
         - basicInfo
         - scaling
         - runtime
+        - lora
         - routing
         - disaggregation
         - observability

@@ -73,6 +73,8 @@ spec:
               value: {{ .Values.metrics.podMonitor.enabled | quote }}
             - name: POD_MONITOR_INTERVAL
               value: {{ .Values.metrics.podMonitor.interval | quote }}
+            - name: LORA_ADAPTER_CATALOG
+              value: {{ .Values.loraAdapters | toJson | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

@@ -8,6 +8,33 @@
 // +k8s:openapi-gen=true
 package components
 
+// LoRAAdapterSpec identifies one LoRA fine-tune served alongside the base model.
+// Each adapter is addressable by name in OpenAI "model" requests once KServe
+// configures vLLM (--lora-modules).
+type LoRAAdapterSpec struct {
+	// Name is the model name clients use in requests (e.g. "my-ft-v2").
+	Name string `json:"name"`
+
+	// URI is the adapter artifact location (hf://, s3://, or pvc://).
+	URI string `json:"uri"`
+}
+
+// LoRASpec configures LoRA adapters on top of the base modelURI.
+type LoRASpec struct {
+	// Adapters is the list of LoRA modules to load. KServe downloads hf:// and
+	// s3:// adapters via the storage-initializer and mounts pvc:// adapters directly.
+	Adapters []LoRAAdapterSpec `json:"adapters,omitempty"`
+
+	// MaxRank maps to vLLM --max-lora-rank (default 16 when unset).
+	MaxRank *int32 `json:"maxRank,omitempty"`
+
+	// MaxAdapters maps to vLLM --max-loras (defaults to adapter count when unset).
+	MaxAdapters *int32 `json:"maxAdapters,omitempty"`
+
+	// MaxCpuAdapters maps to vLLM --max-cpu-loras (defaults to adapter count when unset).
+	MaxCpuAdapters *int32 `json:"maxCpuAdapters,omitempty"`
+}
+
 // VllmCustomSpec defines custom configuration for the vllm component type,
 // which is rendered into a KServe LLMInferenceService (serving.kserve.io/v1alpha2).
 type VllmCustomSpec struct {
@@ -58,9 +85,30 @@ type VllmCustomSpec struct {
 
 	// DisableStorageInitializer skips the storage-initializer init container.
 	// Useful when models are pre-loaded via a LocalModelCache, modelcar, or an
-	// alternative streamer (e.g. RunAI Model Streamer).
+	// alternative streamer (e.g. RunAI Model Streamer). Must remain false when
+	// LoRA adapters use hf:// or s3:// URIs.
 	DisableStorageInitializer *bool `json:"disableStorageInitializer,omitempty"`
+
+	// LoRA attaches one or more LoRA adapters to the base model. Rendered to
+	// LLMInferenceService.spec.model.lora; KServe handles download and vLLM flags.
+	// Adapters may also be selected via loraDeployment + loraSlot1..3 (UI catalog).
+	LoRA *LoRASpec `json:"lora,omitempty"`
+
+	// LoraDeployment toggles LoRA serving in the UI wizard: "disabled" (default) or
+	// "enabled". When enabled, loraSlot1..3 name keys resolve against the chart
+	// loraAdapters catalog (LORA_ADAPTER_CATALOG env on the provider).
+	LoraDeployment string `json:"loraDeployment,omitempty"`
+
+	// LoraSlot1..3 hold catalog adapter names chosen in the UI (empty = unused).
+	LoraSlot1 string `json:"loraSlot1,omitempty"`
+	LoraSlot2 string `json:"loraSlot2,omitempty"`
+	LoraSlot3 string `json:"loraSlot3,omitempty"`
 }
+
+const (
+	LoraDeploymentDisabled = "disabled"
+	LoraDeploymentEnabled  = "enabled"
+)
 
 // ModelServerCustomSpec defines custom configuration for the modelServer
 // component type, which is rendered into a KServe InferenceService predictor

@@ -1,0 +1,45 @@
+# Example: LLM Instance with LoRA adapters (Persona 2.2)
+#
+# Adapters are selected from the operator catalog (chart loraAdapters) via
+# three fixed slots in the UI, or set explicitly in YAML as shown below.
+# Each adapter name is the model field in OpenAI-compatible requests.
+#
+# Prerequisites:
+#   - KServe LLMInferenceService CRD installed (provider chart bundles it)
+#   - vLLM runtime with LoRA support on the cluster
+#   - Adapter weights reachable from the cluster (HF, S3, etc.)
+#
+# Apply:
+#   kubectl apply -f examples/instance-llm-lora.yaml
+#
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: llm-lora-demo
+  namespace: default
+spec:
+  topology: llm
+  components:
+    llmEngine:
+      parameters:
+        modelURI: hf://HuggingFaceTB/SmolLM2-135M-Instruct
+        # UI path: enable LoRA deployment and pick adapters from catalog slots.
+        loraDeployment: enabled
+        loraSlot1: smollm2-135m-sft
+        loraSlot2: qwen2.5-0.5b-sft
+        # loraSlot3: qwen2.5-0.5b-maestro  # optional third adapter
+        lora:
+          maxRank: 64
+          maxAdapters: 3
+          maxCpuAdapters: 2
+          # YAML-only path (when loraDeployment is disabled):
+          # adapters:
+          #   - name: sql-lora
+          #     uri: hf://my-org/sql-lora-adapter
+          #   - name: code-style
+          #     uri: s3://my-bucket/adapters/code-style
+    resources:
+      parameters:
+        cpu: "4"
+        memory: 16Gi
+        gpu: "1"

@@ -35,8 +35,7 @@ components: { predictor: { parameters: { storageURI: pvc://ft-claim/my-model } }
 
 ## 2.2 Serve LoRA adapters on top of a base model
 
-**Status:** Gap — no first-class field; reachable today only through inline
-`config`/`baseRefs` vLLM args.
+**Status:** Supported (`llm`)
 
 As an ML engineer, I want to attach one or more LoRA adapters to a base model,
 so that I can serve many fine-tunes without loading a full model per variant.
@@ -46,17 +45,28 @@ so that I can serve many fine-tunes without loading a full model per variant.
 - Each adapter is addressable as its own `model` name in requests.
 - Adapters can be added/removed without redeploying the base model.
 
-**Provider mapping (interim)** — pass vLLM LoRA args through the inline `config`
-or a custom `LLMInferenceServiceConfig` referenced via `baseRefs`:
+**Provider mapping**
 ```yaml
 components:
   llmEngine:
     parameters:
-      baseRefs: [my-lora-config]   # config enabling --enable-lora + adapter modules
+      modelURI: hf://meta-llama/Llama-3.2-1B-Instruct
+      lora:
+        maxRank: 16
+        adapters:
+          - name: sentiment-ft
+            uri: hf://my-org/llama-sentiment-lora
+          - name: support-ft
+            uri: s3://models-bucket/loras/support-v3
 ```
 
-**Gap to close:** a structured `adapters:` list on `llmEngine` (name, URI,
-optional base) that renders the vLLM LoRA flags and download wiring.
+KServe downloads `hf://` / `s3://` adapters in the storage-initializer,
+mounts `pvc://` adapters directly, and injects vLLM `--lora-modules` flags.
+See `examples/instance-llm-lora.yaml`.
+
+> UI note: enable **LoRA deployment** in the wizard and pick up to three adapters
+> from the operator catalog (`chart loraAdapters` / `spec.uiSchema.llm.loraCatalog`).
+> Alternatively, set `lora.adapters` in Instance YAML when deployment mode is disabled.
 
 ---
 
