@@ -18,7 +18,7 @@ YQ_VERSION ?= v4.44.6
 YQ ?= $(LOCALBIN)/yq-$(YQ_VERSION)
 
 # golangci-lint version
-GOLANGCI_LINT_VERSION ?= v1.63.4
+GOLANGCI_LINT_VERSION ?= v2.12.2
 GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 
 # Helm chart directory
@@ -97,10 +97,18 @@ sync-crds: ## Vendor the KServe CRDs into the chart's crds/ directory from $(KSE
 
 .PHONY: sync-llm-presets
 sync-llm-presets: ## Vendor the KServe LLM preset configs into the chart from $(KSERVE_CHARTS).
-	@echo "Syncing KServe LLM preset configs from $(KSERVE_CHARTS) into $(CHART_DIR)/files/..."
-	@mkdir -p $(CHART_DIR)/files/llmisvcconfigs
-	@cp $(KSERVE_CHARTS)/kserve-runtime-configs/files/llmisvcconfigs/resources.yaml $(CHART_DIR)/files/llmisvcconfigs/resources.yaml
-	@echo "Done."
+	@if [ ! -f "$(KSERVE_CHARTS)/kserve-runtime-configs/files/llmisvcconfigs/resources.yaml" ]; then \
+		echo "KSERVE_CHARTS not found at $(KSERVE_CHARTS); keeping existing vendored LLM presets in $(CHART_DIR)/files/llmisvcconfigs/"; \
+		if [ ! -f "$(CHART_DIR)/files/llmisvcconfigs/resources.yaml" ]; then \
+			echo "ERROR: $(CHART_DIR)/files/llmisvcconfigs/resources.yaml is missing. Restore from git or clone KServe next to this repo."; \
+			exit 1; \
+		fi; \
+	else \
+		echo "Syncing KServe LLM preset configs from $(KSERVE_CHARTS) into $(CHART_DIR)/files/..."; \
+		mkdir -p $(CHART_DIR)/files/llmisvcconfigs; \
+		cp $(KSERVE_CHARTS)/kserve-runtime-configs/files/llmisvcconfigs/resources.yaml $(CHART_DIR)/files/llmisvcconfigs/resources.yaml; \
+		echo "Done."; \
+	fi
 
 .PHONY: sync-dashboards
 sync-dashboards: ## Copy Grafana dashboard JSON from docs/ into the Helm chart.
@@ -213,7 +221,7 @@ $(YQ): $(LOCALBIN)
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Install golangci-lint.
 $(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and target name. Usage:
 # $(call go-install-tool,<target>,<package>,<version>)

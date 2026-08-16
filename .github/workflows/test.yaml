@@ -10,50 +10,67 @@ on:
 permissions:
   contents: read
 
+env:
+  K3D_VERSION: v5.8.3
+  TILT_VERSION: 0.37.5
+  CHAINSAW_VERSION: v0.2.15
+
 jobs:
   test:
     name: Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
 
       - name: Install k3d
         run: |
-          curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+          curl -fsSL "https://raw.githubusercontent.com/k3d-io/k3d/${K3D_VERSION}/install.sh" \
+            | TAG="${K3D_VERSION}" bash
+          k3d version
+
+      - name: Install Tilt
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/tilt-dev/tilt/v${TILT_VERSION}/scripts/install.sh" \
+            | bash
+          tilt version
+
+      - name: Install chainsaw
+        run: |
+          go install "github.com/kyverno/chainsaw@${CHAINSAW_VERSION}"
+          chainsaw version
 
       - name: Create k3d cluster
         run: make k3d-cluster-up
 
-      - name: Install prerequisites
-        run: |
-          # Install OpenEverest CRDs
-          kubectl apply -f https://raw.githubusercontent.com/openeverest/openeverest/v2/config/crd/bases/core.openeverest.io_providers.yaml
-          kubectl apply -f https://raw.githubusercontent.com/openeverest/openeverest/v2/config/crd/bases/core.openeverest.io_instances.yaml
-
-          # TODO: Install your operator
-          # kubectl apply -f https://example.com/operator/deploy/bundle.yaml
-
-          # Install Provider via Helm
-          make helm-install
-
-      - name: Install kuttl
-        run: |
-          curl -Lo /usr/local/bin/kubectl-kuttl https://github.com/kudobuilder/kuttl/releases/latest/download/kubectl-kuttl_linux_amd64
-          chmod +x /usr/local/bin/kubectl-kuttl
-
-      - name: Run provider in background
-        run: |
-          make run &
-          sleep 5
+      # `tilt ci` runs the same bootstrap as the local `make dev-up` loop and
+      # exits once every resource is ready: the released OpenEverest core, the
+      # release-2.0 core CRDs, cert-manager, the provider image, and the
+      # provider chart (which brings the KServe CRDs and controllers with it).
+      #
+      # This provider's chart is not standalone — it needs the OpenEverest core
+      # CRDs (Provider, Instance, InstancePreset) and cert-manager to exist
+      # first — so `helm install` on a bare cluster cannot work. The Tiltfile is
+      # the single source of truth for that bootstrap order, shared with the
+      # local dev loop, which keeps CI and `make dev-up` from drifting apart.
+      - name: Bootstrap cluster (OpenEverest core + provider)
+        run: tilt ci -f dev/Tiltfile
 
       - name: Run integration tests
         run: make test-integration
+
+      - name: Dump diagnostics
+        if: failure()
+        run: |
+          kubectl get instances,inferenceservices,llminferenceservices -A -o wide || true
+          kubectl get pods -A -o wide || true
+          kubectl logs -l app.kubernetes.io/name=provider-kserve --tail=200 --all-containers || true
 
       - name: Cleanup
         if: always()
