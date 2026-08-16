@@ -62,6 +62,18 @@ jobs:
       - name: Bootstrap cluster (OpenEverest core + provider)
         run: tilt ci -f dev/Tiltfile
 
+      - name: Wait for KServe controllers to be ready
+        run: |
+          echo "Waiting for kserve-controller-manager rollout..."
+          kubectl rollout status deployment/kserve-controller-manager -n default --timeout=180s
+          echo "Waiting for llmisvc-controller-manager rollout..."
+          kubectl rollout status deployment/llmisvc-controller-manager -n default --timeout=180s
+          echo "Verifying webhook certs are populated..."
+          kubectl wait secret/kserve-webhook-server-cert \
+            --for=jsonpath='{.data.tls\.crt}' -n default --timeout=120s
+          kubectl wait secret/llmisvc-webhook-server-cert \
+            --for=jsonpath='{.data.tls\.crt}' -n default --timeout=120s
+
       - name: Run integration tests
         run: make test-integration
 
