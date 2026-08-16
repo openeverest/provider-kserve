@@ -44,7 +44,7 @@ dependencies:
   # Issuer, ClusterStorageContainer).
   - name: kserve-resources
     alias: kserveResources
-    version: "v0.19.0"
+    version: "v0.20.0"
     repository: "oci://ghcr.io/kserve/charts"
     condition: kserveResources.enabled
   # KServe LLMInferenceService controller + webhook — reconciles the llm
@@ -52,7 +52,7 @@ dependencies:
   # kserve-resources (see values.yaml).
   - name: kserve-llmisvc-resources
     alias: kserveLlmisvcResources
-    version: "v0.19.0"
+    version: "v0.20.0"
     repository: "oci://ghcr.io/kserve/charts"
     condition: kserveLlmisvcResources.enabled
   # KServe runtime configurations — ships the well-known LLMInferenceServiceConfig
@@ -62,7 +62,7 @@ dependencies:
   # predictor topology has no runtime to schedule.
   - name: kserve-runtime-configs
     alias: kserveRuntimeConfigs
-    version: "v0.19.0"
+    version: "v0.20.0"
     repository: "oci://ghcr.io/kserve/charts"
     condition: kserveRuntimeConfigs.enabled
   # Optional Envoy data-plane controller. AI Gateway v0.4 requires Envoy
