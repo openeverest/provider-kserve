@@ -43,7 +43,8 @@ flowchart LR
 The provider watches `Instance` resources whose `spec.providerRef.name` is `provider-kserve`,
 and reports workload health back onto `Instance.status`. It never manages pods directly — all
 lifecycle work is delegated to the KServe controllers. Everything is created in
-**RawDeployment** mode (plain Deployments plus HPA, no Knative dependency).
+KServe's **Standard** mode (plain Deployments plus HPA, no Knative dependency); KServe
+formerly called this mode `RawDeployment`.
 
 ## Compatibility
 
@@ -218,7 +219,7 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 
 ### Accessing the model
 
-vLLM serves an OpenAI-compatible API on **port 8000**. In RawDeployment mode KServe only
+vLLM serves an OpenAI-compatible API on **port 8000**. In Standard mode KServe only
 creates an in-cluster `ClusterIP` Service, so how you reach the model depends on
 `spec.topology.parameters.externalAccess` (or the legacy
 `spec.components.llmEngine.service.serviceType`):
@@ -557,9 +558,9 @@ Instead the provider vendors the preset file (see `make sync-llm-presets`) under
 `llmPresets.enabled`). This is what lets the provider install into any namespace. Without the
 presets the `llm` topology stalls with `ConfigNotFound: kserve-config-llm-template`.
 
-Both controllers default to KServe's **RawDeployment** mode (plain Deployments plus HPA, no
-Knative/Istio), matching the deployment mode the provider annotates on every resource it
-creates. `kserve-resources` owns the shared KServe resources (config `ConfigMap`, self-signed
+Both controllers default to KServe's **Standard** mode (plain Deployments plus HPA, no
+Knative/Istio), matching the deployment mode the provider annotates on every `InferenceService`
+it creates. `kserve-resources` owns the shared KServe resources (config `ConfigMap`, self-signed
 `Issuer`, `ClusterStorageContainer`); the llmisvc chart has them disabled to avoid collisions
 within one release.
 

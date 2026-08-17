@@ -336,10 +336,11 @@ kserveResources:
   enabled: true
   kserve:
     controller:
-      # -- Cluster-wide default deployment mode. RawDeployment yields plain
-      # Kubernetes Deployments + HPA and avoids the Knative/Istio dependency.
-      # The provider also annotates every resource for RawDeployment.
-      deploymentMode: RawDeployment
+      # -- Cluster-wide default deployment mode. Standard (formerly named
+      # "RawDeployment") yields plain Kubernetes Deployments + HPA and avoids
+      # the Knative/Istio dependency. The provider also annotates every
+      # InferenceService for Standard.
+      deploymentMode: Standard
 
 # -- KServe LLMInferenceService controller (llm topology). Reconciles the
 # `LLMInferenceService` resources the provider creates for vLLM serving.
@@ -353,7 +354,7 @@ kserveLlmisvcResources:
     # shared ConfigMap and self-signed Issuer are created here instead.
     createSharedResources: false
     controller:
-      deploymentMode: RawDeployment
+      deploymentMode: Standard
 
 # -- KServe runtime configurations. Ships the `ClusterServingRuntime`s the
 # InferenceService controller selects from by model format (needed by the

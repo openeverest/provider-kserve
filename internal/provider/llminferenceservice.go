@@ -449,14 +449,11 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		spec.Prefill = prefill
 	}
 
-	meta := c.ObjectMeta(c.Name())
-	if meta.Annotations == nil {
-		meta.Annotations = map[string]string{}
-	}
-	meta.Annotations[common.DeploymentModeAnnotation] = common.DeploymentModeRaw
-
+	// No deploymentMode annotation here: the llmisvc controller has no
+	// Knative path and never reads it (grep DeploymentMode under
+	// pkg/controller/v1alpha1/llmisvc — no hits). Only InferenceService uses it.
 	return &kservev1alpha2.LLMInferenceService{
-		ObjectMeta: meta,
+		ObjectMeta: c.ObjectMeta(c.Name()),
 		Spec:       spec,
 	}, nil
 }

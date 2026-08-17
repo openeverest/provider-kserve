@@ -20,10 +20,12 @@ const (
 	TopologyLLM       = "llm"
 	TopologyPredictor = "predictor"
 
-	// DeploymentModeAnnotation and DeploymentModeRaw select KServe's
-	// RawDeployment mode (plain Kubernetes Deployment + HPA, no Knative).
+	// DeploymentModeAnnotation and DeploymentModeStandard select KServe's
+	// Standard mode (plain Kubernetes Deployment + HPA, no Knative). KServe
+	// deprecated the old name for this mode, "RawDeployment", in favour of
+	// "Standard"; the value is unchanged in behaviour.
 	DeploymentModeAnnotation = "serving.kserve.io/deploymentMode"
-	DeploymentModeRaw        = "RawDeployment"
+	DeploymentModeStandard   = "Standard"
 
 	// hfTokenSecretEnvVar names the environment variable (set by the Helm chart
 	// from .Values.huggingface.tokenSecretName) holding the Secret that provides
