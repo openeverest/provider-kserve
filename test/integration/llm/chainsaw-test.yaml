@@ -6,9 +6,13 @@ metadata:
 spec:
   description: |
     Lifecycle of an llm Instance: create it, verify the provider derives a
-    KServe LLMInferenceService, simulate the KServe controller marking the
-    service ready, verify the Instance reaches Ready, and verify the
-    LLMInferenceService is garbage collected on deletion.
+    KServe LLMInferenceService, and verify the LLMInferenceService is garbage
+    collected on deletion.
+
+    Readiness is deliberately NOT asserted here — see the note in
+    ../predictor/chainsaw-test.yaml. The llmisvc controller owns
+    LLMInferenceService.status the same way, so faking Ready is the same race;
+    this path just used to win it more often.
   catch:
     - script:
         content: kubectl -n $NAMESPACE get instance,llminferenceservice -o yaml
@@ -19,17 +23,6 @@ spec:
             file: 00-create-llm.yaml
         - assert:
             file: 00-assert.yaml
-
-    # Simulate the KServe controller marking the LLMInferenceService ready so the
-    # provider can propagate a Ready phase back to the Instance.
-    - name: llm-ready
-      try:
-        - script:
-            content: |
-              kubectl patch llminferenceservice/test-kserve-llm --subresource status -n $NAMESPACE \
-                --type=merge -p '{"status":{"url":"http://test-kserve-llm.'"$NAMESPACE"'.example.com","conditions":[{"type":"Ready","status":"True","lastTransitionTime":"2026-01-01T00:00:00Z"}]}}'
-        - assert:
-            file: 10-assert.yaml
 
     - name: delete-llm
       try:

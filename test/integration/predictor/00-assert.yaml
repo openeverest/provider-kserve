@@ -1,15 +1,10 @@
 # The provider must reconcile the Instance into a KServe InferenceService with
-# the requested model format, storage URI, and autoscaling bounds, in
-# RawDeployment mode.
+# the requested model format, storage URI, and autoscaling bounds, in Standard
+# deployment mode (plain Deployment + HPA, no Knative).
 #
-# The provider requests "RawDeployment" (common.DeploymentModeRaw), but KServe
-# deprecated that value in favour of "Standard" and the v1beta1 webhook
-# normalizes it on admission (constants.ParseDeploymentMode). The stored
-# annotation is therefore "Standard", not what the provider wrote.
-#
-# The LLMInferenceService path is reconciled by the llmisvc controller and never
-# passes through that webhook, so test/integration/llm still asserts the literal
-# "RawDeployment". The asymmetry is intentional.
+# The provider writes "Standard" directly. Before that it wrote the deprecated
+# "RawDeployment", which KServe's defaulting webhook rewrote to "Standard" on
+# admission, so the stored annotation never matched what the provider sent.
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
