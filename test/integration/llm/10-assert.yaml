@@ -1,8 +1,0 @@
-# Once the LLMInferenceService reports Ready, the provider must move the
-# Instance to the Ready phase.
-apiVersion: core.openeverest.io/v1alpha1
-kind: Instance
-metadata:
-  name: test-kserve-llm
-status:
-  phase: Ready
