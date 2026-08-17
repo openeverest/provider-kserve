@@ -3,14 +3,13 @@ module github.com/openeverest/provider-kserve
 go 1.26.3
 
 require (
-	github.com/kserve/kserve v0.19.0
+	github.com/kserve/kserve v0.20.0
 	github.com/openeverest/openeverest/v2 v2.0.0-dev.2
 	k8s.io/api v0.36.3
 	k8s.io/apimachinery v0.36.3
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5
 	knative.dev/pkg v0.0.0-20260120122510-4a022ed9999a
 	sigs.k8s.io/controller-runtime v0.24.1
-	github.com/kserve/kserve v0.20.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
