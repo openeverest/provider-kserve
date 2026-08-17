@@ -128,7 +128,7 @@ that passed evaluation serves identically in production.
 
 **Provider mapping**
 ```yaml
-version: "0.15"                 # curated runtime bundle (both)
+version: "0.20"                 # curated runtime bundle (both)
 components:
   predictor:
     parameters:
