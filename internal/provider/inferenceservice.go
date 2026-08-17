@@ -61,7 +61,7 @@ func buildInferenceService(c *controller.Context) (*kservev1beta1.InferenceServi
 		model.Runtime = ptr.To(params.Runtime)
 	}
 	if comp.Resources != nil {
-		model.Container.Resources = *comp.Resources
+		model.Resources = *comp.Resources
 	}
 
 	predictor := kservev1beta1.PredictorSpec{Model: model}
