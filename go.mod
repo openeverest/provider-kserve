@@ -10,6 +10,7 @@ require (
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5
 	knative.dev/pkg v0.0.0-20260120122510-4a022ed9999a
 	sigs.k8s.io/controller-runtime v0.24.1
+	github.com/kserve/kserve v0.20.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -210,7 +211,7 @@ require (
 	knative.dev/networking v0.0.0-20260120131110-a7cdca238a0d // indirect
 	knative.dev/serving v0.48.1 // indirect
 	sigs.k8s.io/gateway-api v1.5.1 // indirect
-	sigs.k8s.io/gateway-api-inference-extension v1.3.1 // indirect
+	sigs.k8s.io/gateway-api-inference-extension v1.5.0 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/mcs-api v0.5.0 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect

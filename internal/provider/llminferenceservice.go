@@ -109,7 +109,7 @@ func validateLLM(c *controller.Context) error {
 		return fmt.Errorf("externalAccess must be one of ClusterIP, LoadBalancer, NodePort or EnvoyAIGateway")
 	}
 	if topo.UsesAIGateway() && !common.AIGatewayEnabled() {
-		return fmt.Errorf("Envoy AI Gateway requires aiGateway.enabled in the provider chart")
+		return fmt.Errorf("externalAccess EnvoyAIGateway requires aiGateway.enabled in the provider chart")
 	}
 	if topo.TokenLimitPerHour != nil {
 		if !topo.UsesAIGateway() {
@@ -364,12 +364,12 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 
 	// Static replicas from the component spec.
 	if comp.Replicas != nil {
-		spec.WorkloadSpec.Replicas = comp.Replicas
+		spec.Replicas = comp.Replicas
 	}
 
 	// Runtime parallelism.
 	if params.TensorParallelSize != nil || params.PipelineParallelSize != nil {
-		spec.WorkloadSpec.Parallelism = &kservev1alpha2.ParallelismSpec{
+		spec.Parallelism = &kservev1alpha2.ParallelismSpec{
 			Tensor:   params.TensorParallelSize,
 			Pipeline: params.PipelineParallelSize,
 		}
@@ -403,17 +403,17 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 	}
 
 	if haveMainOverride {
-		spec.WorkloadSpec.Template = &corev1.PodSpec{
+		spec.Template = &corev1.PodSpec{
 			Containers: []corev1.Container{mainContainer},
 		}
 	}
 
 	// Attach the HuggingFace token ServiceAccount.
 	if common.HFTokenSecretName() != "" {
-		if spec.WorkloadSpec.Template == nil {
-			spec.WorkloadSpec.Template = &corev1.PodSpec{}
+		if spec.Template == nil {
+			spec.Template = &corev1.PodSpec{}
 		}
-		spec.WorkloadSpec.Template.ServiceAccountName = modelPullerSAName(c.Name())
+		spec.Template.ServiceAccountName = modelPullerSAName(c.Name())
 	}
 
 	// Config inheritance. The CPU compute profile composes the bundled CPU-only
