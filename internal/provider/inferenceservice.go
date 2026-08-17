@@ -80,7 +80,7 @@ func buildInferenceService(c *controller.Context) (*kservev1beta1.InferenceServi
 	if meta.Annotations == nil {
 		meta.Annotations = map[string]string{}
 	}
-	meta.Annotations[common.DeploymentModeAnnotation] = common.DeploymentModeRaw
+	meta.Annotations[common.DeploymentModeAnnotation] = common.DeploymentModeStandard
 
 	return &kservev1beta1.InferenceService{
 		ObjectMeta: meta,

@@ -12,8 +12,9 @@ aggregate.
 > **Not qpext.** KServe's [`qpext`](https://github.com/kserve/kserve/blob/master/qpext/README.md)
 > extends the Knative **queue-proxy** sidecar to merge two containers' metrics
 > onto one port. It only applies to Serverless/Knative mode. This provider runs
-> everything in **RawDeployment** mode — one container per model pod, one
-> `/metrics` endpoint — so `qpext` is irrelevant here.
+> everything in KServe's **Standard** mode (formerly `RawDeployment`) — one
+> container per model pod, one `/metrics` endpoint — so `qpext` is irrelevant
+> here.
 
 ## How it works
 
