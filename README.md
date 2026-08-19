@@ -52,7 +52,7 @@ This provider has **not been released yet** — the table describes `main`.
 
 | provider-kserve | OpenEverest | KServe | Kubernetes |
 |---|---|---|---|
-| `main` | `>= 2.0.0` | `0.19.x` | `1.30` – `1.34` |
+| `main` | `>= 2.0.0-dev.2` | `0.20.x` | `1.30` – `1.34` |
 
 ## Capabilities
 
@@ -167,8 +167,11 @@ There is no default: an `Instance` without `spec.topology.type` is rejected.
 <!-- BEGIN GENERATED: versions -->
 | Version bundle | Default | llmEngine (vLLM) | predictor (KServe) |
 |---|---|---|---|
-| `0.15` | ✅ | `0.11.0` | `0.15.0` |
-| `0.14` | | `0.10.1` | `0.14.1` |
+| `0.20` | ✅ | `0.25.1` | `0.20.0` |
+
+One bundle, matching the single set of KServe controllers the chart installs. The
+llmEngine version is the CPU profile's vLLM build; the bundled GPU presets run
+KServe's own runtime image and are not selectable here.
 <!-- END GENERATED: versions -->
 
 Source of truth: [definition/versions.yaml](definition/versions.yaml).

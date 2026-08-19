@@ -38,7 +38,7 @@ install_openeverest = str2bool(os.getenv('INSTALL_OPENEVEREST', 'true'))
 
 # Released OpenEverest core version to install. Defaults to the OpenEverest v2
 # dev release (published as a prerelease chart). Empty means latest prerelease.
-openeverest_version = os.getenv('OPENEVEREST_VERSION', '2.0.0-dev.1')
+openeverest_version = os.getenv('OPENEVEREST_VERSION', '2.0.0-dev.2')
 
 # Helm repository that hosts the OpenEverest core chart.
 openeverest_helm_repo = os.getenv(
@@ -161,7 +161,7 @@ if install_openeverest:
         labels=['openeverest'],
     )
 
-    # Upgrade OpenEverest CRDs after core install. The published 2.0.0-dev.1
+    # Upgrade OpenEverest CRDs after core install. The published 2.0.0-dev.2
     # chart still ships pre-#2583 schemas (customSpecSchema/configSchema); the
     # provider emits parametersSchema and needs the release-2.0 CRDs.
     openeverest_crd_base = 'https://raw.githubusercontent.com/openeverest/openeverest/{0}/config/crd/bases'.format(
