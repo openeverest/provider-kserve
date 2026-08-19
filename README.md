@@ -624,7 +624,8 @@ make dev-up             # local k3d cluster + Tilt dev environment
 make generate           # RBAC, provider spec, vendored CRDs and presets, Helm chart sync
 make run                # run the provider locally against the cluster
 make test               # unit tests
-make test-integration   # chainsaw suites under test/integration/
+make test-reconcile     # fast chainsaw suites under test/reconcile/
+make test-e2e           # slow chainsaw suites under test/e2e/ (real models)
 make dev-down
 ```
 
@@ -658,7 +659,8 @@ and code generation are documented once for all providers in
 | `charts/provider-kserve/` | Helm chart (`generated/`, `crds/` and `files/` are produced by `make generate`) |
 | `config/rbac/role.yaml` | Generated `ClusterRole` — do not edit |
 | `docs/` | Deployment, TLS and observability guides, Grafana dashboards |
-| `test/integration/` | Chainsaw suites: `llm`, `predictor` |
+| `test/reconcile/` | Fast chainsaw suites (`llm`, `predictor`): the CR the provider derives, and its garbage collection |
+| `test/e2e/` | Slow chainsaw suites: a real model served end to end. Manually gated, not run per PR |
 | `test/vars.sh` | Pinned KServe and workload versions used by tests |
 | `examples/` | Example `Instance` resources |
 | `dev/` | Tilt dev environment, `.env` configuration, k3d cluster config |
@@ -668,11 +670,16 @@ and code generation are documented once for all providers in
 ### Testing
 
 - **Unit tests** — `make test`.
-- **Integration tests** — chainsaw suites under [test/integration/](test/integration/), one
-  per topology.
+- **Reconcile tests** — chainsaw suites under [test/reconcile/](test/reconcile/), one per
+  topology. They assert what the provider deterministically controls: the spec of the KServe
+  CR it derives from an `Instance`, and that the CR is garbage collected when the `Instance`
+  is deleted. Fast, and run on every pull request.
+- **E2E tests** — chainsaw suites under [test/e2e/](test/e2e/): a real model taken to a
+  serving state. Minutes per test, so they are manually gated rather than run per PR.
 - **CI** — [.github/workflows/build.yaml](.github/workflows/build.yaml) and
   [.github/workflows/test.yaml](.github/workflows/test.yaml) run lint, build, unit tests,
-  generated-file verification, Helm lint, and each integration suite on every pull request.
+  generated-file verification, Helm lint, and each reconcile suite on every pull request. The
+  e2e suite has its own trigger and does not run automatically.
 
 ## Troubleshooting
 
