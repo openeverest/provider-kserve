@@ -28,11 +28,15 @@ spec:
       try:
         - script:
             content: kubectl -n $NAMESPACE delete instance/test-kserve-llm --wait=false
-        - error:
-            file: 20-errors.yaml
         - wait:
             apiVersion: core.openeverest.io/v1alpha1
             kind: Instance
+            name: test-kserve-llm
+            for:
+              deletion: {}
+        - wait:
+            apiVersion: serving.kserve.io/v1alpha2
+            kind: LLMInferenceService
             name: test-kserve-llm
             for:
               deletion: {}
