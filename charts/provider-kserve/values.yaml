@@ -301,19 +301,23 @@ leaderElection:
   # -- Enable leader election (recommended for HA deployments)
   enabled: true
 
-# The KServe CRDs (InferenceService, LLMInferenceService, and supporting kinds)
-# are vendored under this chart's `crds/` directory and installed automatically
-# by Helm. There is no toggle: Helm installs CRDs from `crds/` if they are not
-# already present and never modifies or deletes existing ones. Manage CRD
-# upgrades out of band (e.g. `kubectl apply`) as Helm does not upgrade `crds/`.
-
 # ---------------------------------------------------------------------------
-# Bundled KServe controllers and cert-manager (subchart dependencies).
+# Bundled KServe CRDs, controllers, and cert-manager (subchart dependencies).
 #
 # The provider translates Instances into KServe custom resources but does not
 # reconcile them. These bundled controllers do. Toggle any of them off to
 # manage that piece out of band. See Chart.yaml for the dependency wiring.
 # ---------------------------------------------------------------------------
+
+# -- KServe CRDs (InferenceService, LLMInferenceService, and supporting kinds).
+# Installed by default so a single helm install yields a working stack. Helm
+# tracks them as release resources: upgrade updates the schemas; uninstall
+# deletes the CRDs and every object of those kinds. Set enabled: false when
+# the cluster already has the CRDs (shared / BYO-KServe) so this release does
+# not own them.
+kserveCrds:
+  # -- Install the KServe and llmisvc CRD charts as part of this release
+  enabled: true
 
 # -- cert-manager provides the webhook certificates the KServe controllers
 # require. Both controllers run admission webhooks whose certificates are

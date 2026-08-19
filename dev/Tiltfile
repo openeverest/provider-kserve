@@ -282,11 +282,11 @@ local_resource(
 # helm_resource also guarantees the Provider CR is applied only after the core
 # CRDs exist.
 #
-# The KServe CRDs are vendored under charts/provider-kserve/crds/ and installed
-# automatically by Helm's crds/ handling (idempotent, never deleted on
-# uninstall). The KServe controllers reconcile the InferenceService /
-# LLMInferenceService resources the provider creates; cert-manager is installed
-# separately above, so the bundled copy is disabled here.
+# The KServe CRDs come from the kserve-crd / kserve-llmisvc-crd subcharts
+# (kserveCrds.enabled, default true). The KServe controllers reconcile the
+# InferenceService / LLMInferenceService resources the provider creates;
+# cert-manager is installed separately above, so the bundled copy is disabled
+# here.
 
 provider_resource_deps = ['provider-build', 'provider-helm-deps']
 if install_openeverest:

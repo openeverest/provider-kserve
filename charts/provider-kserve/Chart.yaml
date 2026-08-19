@@ -14,13 +14,11 @@ sources:
 maintainers:
   - name: OpenEverest Contributors
 # The provider translates Instances into KServe custom resources, so the KServe
-# CRDs must exist in the cluster. They are vendored under `crds/` (Helm's special
-# CRD directory) rather than as templated subchart resources. This mirrors how
-# provider-valkey's operator chart ships its CRDs and makes install idempotent:
-# Helm installs the CRDs if absent, skips them if present, and never deletes them
-# on uninstall. The CRDs are kept in sync from the pinned KServe chart via
-# `make sync-crds` (run as part of `make generate`). Do not add these CRDs as
-# templated resources or Helm-release-tracked subcharts.
+# CRDs must exist in the cluster. They are pulled as the kserve-crd and
+# kserve-llmisvc-crd subcharts (same OCI registry and version as the
+# controllers). Toggle off with kserveCrds.enabled=false when the cluster
+# already provides them. Uninstall of this release deletes the CRDs unless
+# that toggle is false.
 #
 # The provider only translates Instances into KServe custom resources — it does
 # not reconcile them. The KServe controllers that do are bundled as subchart
@@ -29,8 +27,8 @@ maintainers:
 # can be toggled off via values (see values.yaml) when managed out of band.
 #
 # The KServe charts are pulled from KServe's published OCI registry
-# (oci://ghcr.io/kserve/charts) pinned to the same version as the vendored CRDs.
-# Run `make helm-deps` to vendor the dependencies into `charts/`.
+# (oci://ghcr.io/kserve/charts), all pinned to one version. Run `make helm-deps`
+# to vendor the dependencies into `charts/`.
 dependencies:
   # cert-manager issues the admission-webhook certificates the KServe
   # controllers require. Installed by default; set `cert-manager.enabled=false`
@@ -39,6 +37,21 @@ dependencies:
     version: "v1.16.2"
     repository: https://charts.jetstack.io
     condition: cert-manager.enabled
+  # KServe CRDs — InferenceService and supporting kinds. Same version as the
+  # controller charts. Gated with the llmisvc CRDs by kserveCrds.enabled.
+  - name: kserve-crd
+    alias: kserveCrds
+    version: "v0.20.0"
+    repository: "oci://ghcr.io/kserve/charts"
+    condition: kserveCrds.enabled
+  # KServe CRDs — LLMInferenceService and LLMInferenceServiceConfig.
+  # Also ships clusterstoragecontainers; helm-deps drops that copy so this
+  # release does not apply the same CRD twice (kserve-crd keeps it).
+  - name: kserve-llmisvc-crd
+    alias: kserveLlmisvcCrds
+    version: "v0.20.0"
+    repository: "oci://ghcr.io/kserve/charts"
+    condition: kserveCrds.enabled
   # KServe InferenceService controller + webhook — reconciles the predictor
   # topology. Owns the shared KServe resources (config ConfigMap, self-signed
   # Issuer, ClusterStorageContainer).
