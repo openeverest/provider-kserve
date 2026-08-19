@@ -73,10 +73,6 @@ jobs:
             --for=jsonpath='{.data.tls\.crt}' -n default --timeout=120s
           kubectl wait secret/llmisvc-webhook-server-cert \
             --for=jsonpath='{.data.tls\.crt}' -n default --timeout=120s
-          kubectl wait pod -l app.kubernetes.io/name=llmisvc-controller-manager \
-            --for=condition=Ready -n default --timeout=120s
-          kubectl wait pod -l app.kubernetes.io/name=kserve-controller-manager \
-            --for=condition=Ready -n default --timeout=120s
 
       - name: Run reconcile tests
         run: make test-reconcile
