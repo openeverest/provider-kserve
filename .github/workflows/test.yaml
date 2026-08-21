@@ -74,8 +74,8 @@ jobs:
           kubectl wait secret/llmisvc-webhook-server-cert \
             --for=jsonpath='{.data.tls\.crt}' -n default --timeout=120s
 
-      - name: Run integration tests
-        run: make test-integration
+      - name: Run reconcile tests
+        run: make test-reconcile
 
       - name: Dump diagnostics
         if: failure()

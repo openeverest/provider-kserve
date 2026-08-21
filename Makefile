@@ -160,9 +160,13 @@ helm-template: helm-deps ## Render Helm chart templates locally (dry-run).
 
 ##@ Testing
 
-.PHONY: test-integration
-test-integration: ## Run integration tests (chainsaw) against a running cluster.
-	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration
+.PHONY: test-reconcile
+test-reconcile: ## Run the fast reconcile tests (chainsaw) against a running cluster.
+	. ./test/vars.sh && chainsaw test --config ./test/reconcile/.chainsaw.yaml ./test/reconcile
+
+.PHONY: test-e2e
+test-e2e: ## Run the e2e tests (chainsaw). Slow: real models, real serving.
+	. ./test/vars.sh && chainsaw test --config ./test/e2e/.chainsaw.yaml ./test/e2e
 
 ##@ Local Development Cluster
 

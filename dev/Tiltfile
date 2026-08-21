@@ -38,7 +38,7 @@ install_openeverest = str2bool(os.getenv('INSTALL_OPENEVEREST', 'true'))
 
 # Released OpenEverest core version to install. Defaults to the OpenEverest v2
 # dev release (published as a prerelease chart). Empty means latest prerelease.
-openeverest_version = os.getenv('OPENEVEREST_VERSION', '2.0.0-dev.1')
+openeverest_version = os.getenv('OPENEVEREST_VERSION', '2.0.0-dev.2')
 
 # Helm repository that hosts the OpenEverest core chart.
 openeverest_helm_repo = os.getenv(
@@ -161,7 +161,7 @@ if install_openeverest:
         labels=['openeverest'],
     )
 
-    # Upgrade OpenEverest CRDs after core install. The published 2.0.0-dev.1
+    # Upgrade OpenEverest CRDs after core install. The published 2.0.0-dev.2
     # chart still ships pre-#2583 schemas (customSpecSchema/configSchema); the
     # provider emits parametersSchema and needs the release-2.0 CRDs.
     openeverest_crd_base = 'https://raw.githubusercontent.com/openeverest/openeverest/{0}/config/crd/bases'.format(
@@ -274,24 +274,19 @@ local_resource(
 )
 
 # ===========================
-# KServe CRDs (own Helm releases)
+# KServe CRDs (before the provider chart)
 # ===========================
 # Helm builds the provider manifest against cluster discovery *before* applying
 # it. kserve-resources includes a ClusterStorageContainer instance, so the CRD
 # must already exist or install dies with "no matches for kind
-# ClusterStorageContainer". Same trick as cert-manager: install the CRD charts
-# as their own releases, then disable the bundled copies. Two releases also
-# lets KServe's lookup skip the duplicate CSC CRD on the llmisvc chart.
-# Tilt runs this with sh (not bash); no pipefail.
+# ClusterStorageContainer". Apply the vendored CRDs first, then wait until
+# they are Established. Tilt runs this with sh (not bash); no pipefail.
 kserve_crds_cmd = (
-    'crd=$(ls {chart}/charts/kserve-crd-*.tgz) && '
-    + 'llm=$(ls {chart}/charts/kserve-llmisvc-crd-*.tgz) && '
-    + 'helm upgrade --install kserve-crds "$crd" --namespace {ns} --create-namespace && '
-    + 'helm upgrade --install kserve-llmisvc-crds "$llm" --namespace {ns} && '
+    'kubectl apply --server-side --force-conflicts -f {chart}/crds/ && '
     + 'kubectl wait --for=condition=Established crd/inferenceservices.serving.kserve.io --timeout=120s && '
     + 'kubectl wait --for=condition=Established crd/llminferenceservices.serving.kserve.io --timeout=120s && '
     + 'kubectl wait --for=condition=Established crd/clusterstoragecontainers.serving.kserve.io --timeout=120s'
-).format(chart=chart_dir, ns=provider_namespace)
+).format(chart=chart_dir)
 local_resource(
     'kserve-crds',
     kserve_crds_cmd,
@@ -308,8 +303,8 @@ local_resource(
 # helm_resource also guarantees the Provider CR is applied only after the core
 # CRDs exist.
 #
-# KServe CRDs and cert-manager are installed as their own releases above, so
-# the bundled copies are disabled here. The KServe controllers reconcile the
+# KServe CRDs are applied above; cert-manager is its own release, so the
+# bundled copy is disabled here. The KServe controllers reconcile the
 # InferenceService / LLMInferenceService resources the provider creates.
 
 provider_resource_deps = ['provider-build', 'provider-helm-deps', 'kserve-crds']

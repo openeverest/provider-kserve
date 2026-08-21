@@ -1,0 +1,25 @@
+---
+# Chainsaw configuration for the e2e suite: tests that run a real model to a
+# serving state. Timeouts are minutes, not seconds, because these tests wait on
+# image pulls and model downloads rather than on a controller writing a CR.
+#
+# This suite is NOT part of the per-PR workflow. It is manually gated - see the
+# e2e workflow issue - because a single test costs 10-20 minutes of runner time.
+apiVersion: chainsaw.kyverno.io/v1alpha2
+kind: Configuration
+metadata:
+  name: e2e
+spec:
+  timeouts:
+    apply: 1m
+    assert: 20m
+    delete: 5m
+    error: 1m
+    exec: 10m
+    cleanup: 5m
+  cleanup:
+    skipDelete: false
+  report:
+    format: XML
+    name: chainsaw-report-e2e
+    path: /tmp
