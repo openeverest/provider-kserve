@@ -282,17 +282,19 @@ local_resource(
 # ClusterStorageContainer". Same trick as cert-manager: install the CRD charts
 # as their own releases, then disable the bundled copies. Two releases also
 # lets KServe's lookup skip the duplicate CSC CRD on the llmisvc chart.
+kserve_crds_cmd = (
+    'set -euo pipefail; '
+    + 'crd=$(ls {chart}/charts/kserve-crd-*.tgz); '
+    + 'llm=$(ls {chart}/charts/kserve-llmisvc-crd-*.tgz); '
+    + 'helm upgrade --install kserve-crds "$crd" --namespace {ns} --create-namespace; '
+    + 'helm upgrade --install kserve-llmisvc-crds "$llm" --namespace {ns}; '
+    + 'kubectl wait --for=condition=Established crd/inferenceservices.serving.kserve.io --timeout=120s; '
+    + 'kubectl wait --for=condition=Established crd/llminferenceservices.serving.kserve.io --timeout=120s; '
+    + 'kubectl wait --for=condition=Established crd/clusterstoragecontainers.serving.kserve.io --timeout=120s'
+).format(chart=chart_dir, ns=provider_namespace)
 local_resource(
     'kserve-crds',
-    'set -euo pipefail; '
-    'crd=$(ls {chart}/charts/kserve-crd-*.tgz); '
-    'llm=$(ls {chart}/charts/kserve-llmisvc-crd-*.tgz); '
-    'helm upgrade --install kserve-crds "$crd" --namespace {ns} --create-namespace; '
-    'helm upgrade --install kserve-llmisvc-crds "$llm" --namespace {ns}; '
-    'kubectl wait --for=condition=Established crd/inferenceservices.serving.kserve.io --timeout=120s; '
-    'kubectl wait --for=condition=Established crd/llminferenceservices.serving.kserve.io --timeout=120s; '
-    'kubectl wait --for=condition=Established crd/clusterstoragecontainers.serving.kserve.io --timeout=120s'.format(
-        chart=chart_dir, ns=provider_namespace),
+    kserve_crds_cmd,
     resource_deps=['provider-helm-deps'],
     labels=['provider'],
 )
