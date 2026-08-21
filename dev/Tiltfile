@@ -274,6 +274,27 @@ local_resource(
 )
 
 # ===========================
+# KServe CRDs (before the provider chart)
+# ===========================
+# Helm builds the provider manifest against cluster discovery *before* applying
+# it. kserve-resources includes a ClusterStorageContainer instance, so the CRD
+# must already exist or install dies with "no matches for kind
+# ClusterStorageContainer". Apply the vendored CRDs first, then wait until
+# they are Established. Tilt runs this with sh (not bash); no pipefail.
+kserve_crds_cmd = (
+    'kubectl apply --server-side --force-conflicts -f {chart}/crds/ && '
+    + 'kubectl wait --for=condition=Established crd/inferenceservices.serving.kserve.io --timeout=120s && '
+    + 'kubectl wait --for=condition=Established crd/llminferenceservices.serving.kserve.io --timeout=120s && '
+    + 'kubectl wait --for=condition=Established crd/clusterstoragecontainers.serving.kserve.io --timeout=120s'
+).format(chart=chart_dir)
+local_resource(
+    'kserve-crds',
+    kserve_crds_cmd,
+    resource_deps=['provider-helm-deps'],
+    labels=['provider'],
+)
+
+# ===========================
 # Provider: Helm chart
 # ===========================
 # Deployed with a real `helm upgrade --install` (via the helm_resource
@@ -282,13 +303,11 @@ local_resource(
 # helm_resource also guarantees the Provider CR is applied only after the core
 # CRDs exist.
 #
-# The KServe CRDs are vendored under charts/provider-kserve/crds/ and installed
-# automatically by Helm's crds/ handling (idempotent, never deleted on
-# uninstall). The KServe controllers reconcile the InferenceService /
-# LLMInferenceService resources the provider creates; cert-manager is installed
-# separately above, so the bundled copy is disabled here.
+# KServe CRDs are applied above; cert-manager is its own release, so the
+# bundled copy is disabled here. The KServe controllers reconcile the
+# InferenceService / LLMInferenceService resources the provider creates.
 
-provider_resource_deps = ['provider-build', 'provider-helm-deps']
+provider_resource_deps = ['provider-build', 'provider-helm-deps', 'kserve-crds']
 if install_openeverest:
     provider_resource_deps = provider_resource_deps + ['openeverest', 'openeverest-crds']
 if install_cert_manager:
