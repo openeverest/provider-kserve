@@ -24,9 +24,8 @@ GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 # Helm chart directory
 CHART_DIR ?= charts/provider-kserve
 
-# Location of the KServe CRD charts used to source the vendored CRDs. Kept in
-# sync with the `replace github.com/kserve/kserve => ../kserve` directive in
-# go.mod. Override KSERVE_CHARTS to point at a different KServe checkout.
+# Local KServe charts checkout used only by sync-llm-presets. Override to
+# point at a different checkout. The KServe CRDs come from Chart.yaml deps.
 KSERVE_CHARTS ?= ../kserve/charts
 
 .PHONY: help
@@ -72,29 +71,6 @@ helm-sync-rbac: yq ## Sync generated RBAC rules into the Helm chart.
 	} > $(CHART_DIR)/generated/rbac-rules.yaml
 	@echo "Done."
 
-.PHONY: sync-crds
-sync-crds: ## Vendor the KServe CRDs into the chart's crds/ directory from $(KSERVE_CHARTS).
-	@if [ ! -f "$(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_inferenceservices.yaml" ]; then \
-		echo "KSERVE_CHARTS not found at $(KSERVE_CHARTS); keeping existing vendored CRDs in $(CHART_DIR)/crds/"; \
-		if [ -z "$$(ls -A $(CHART_DIR)/crds 2>/dev/null)" ]; then \
-			echo "ERROR: $(CHART_DIR)/crds/ is empty. Restore from git or clone KServe next to this repo."; \
-			exit 1; \
-		fi; \
-	else \
-		echo "Syncing KServe CRDs from $(KSERVE_CHARTS) into $(CHART_DIR)/crds/..."; \
-		mkdir -p $(CHART_DIR)/crds; \
-		rm -f $(CHART_DIR)/crds/serving.kserve.io_*.yaml; \
-		cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_inferenceservices.yaml $(CHART_DIR)/crds/; \
-		cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_servingruntimes.yaml $(CHART_DIR)/crds/; \
-		cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_clusterservingruntimes.yaml $(CHART_DIR)/crds/; \
-		cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_inferencegraphs.yaml $(CHART_DIR)/crds/; \
-		cp $(KSERVE_CHARTS)/kserve-crd/templates/serving.kserve.io_trainedmodels.yaml $(CHART_DIR)/crds/; \
-		cp $(KSERVE_CHARTS)/kserve-crd/files/serving.kserve.io_clusterstoragecontainers.yaml $(CHART_DIR)/crds/; \
-		cp $(KSERVE_CHARTS)/kserve-llmisvc-crd/templates/serving.kserve.io_llminferenceservices.yaml $(CHART_DIR)/crds/; \
-		cp $(KSERVE_CHARTS)/kserve-llmisvc-crd/templates/serving.kserve.io_llminferenceserviceconfigs.yaml $(CHART_DIR)/crds/; \
-		echo "Done."; \
-	fi
-
 .PHONY: sync-llm-presets
 sync-llm-presets: ## Vendor the KServe LLM preset configs into the chart from $(KSERVE_CHARTS).
 	@if [ ! -f "$(KSERVE_CHARTS)/kserve-runtime-configs/files/llmisvcconfigs/resources.yaml" ]; then \
@@ -118,18 +94,18 @@ sync-dashboards: ## Copy Grafana dashboard JSON from docs/ into the Helm chart.
 	@echo "Done."
 
 .PHONY: generate
-generate: manifests helm-sync-rbac sync-crds sync-llm-presets sync-dashboards ## Run all code generation (RBAC + Helm sync + CRDs + LLM presets + dashboards + provider spec from definition/).
+generate: manifests helm-sync-rbac sync-llm-presets sync-dashboards ## Run all code generation (RBAC + Helm sync + LLM presets + dashboards + provider spec from definition/).
 	go generate ./...
 	@echo "All generation complete."
 
 .PHONY: verify
 verify: ## Verify that generated files are up-to-date (for CI).
 	@$(MAKE) generate
-	@if git diff --quiet -- config/ $(CHART_DIR)/generated/ $(CHART_DIR)/crds/ $(CHART_DIR)/files/; then \
+	@if git diff --quiet -- config/ $(CHART_DIR)/generated/ $(CHART_DIR)/files/; then \
 		echo "Generated files are up-to-date."; \
 	else \
 		echo "ERROR: Generated files are out of date. Run 'make generate' and commit the changes."; \
-		git diff -- config/ $(CHART_DIR)/generated/ $(CHART_DIR)/crds/ $(CHART_DIR)/files/; \
+		git diff -- config/ $(CHART_DIR)/generated/ $(CHART_DIR)/files/; \
 		exit 1; \
 	fi
 
@@ -153,7 +129,18 @@ docker-push: ## Push docker image.
 helm-deps: ## Download/update Helm chart dependencies.
 	helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
 	helm repo update jetstack >/dev/null 2>&1 || true
-	helm dependency build $(CHART_DIR)
+	helm dependency update $(CHART_DIR)
+	@# Both official CRD charts emit clusterstoragecontainers. lookup only
+	@# skips a *different* Helm release, so one parent release would apply
+	@# the CRD twice. Drop the llmisvc copy; kserve-crd keeps it.
+	@# ponytail: ceiling is "upstream ships CSC in both charts"; delete this
+	@# strip if they split it out.
+	@tgz=$$(ls $(CHART_DIR)/charts/kserve-llmisvc-crd-*.tgz); \
+	tmp=$$(mktemp -d); \
+	COPYFILE_DISABLE=1 tar -xzf "$$tgz" -C "$$tmp"; \
+	rm -f "$$tmp/kserve-llmisvc-crd/templates/serving.kserve.io_clusterstoragecontainers.yaml"; \
+	COPYFILE_DISABLE=1 tar -czf "$$tgz" -C "$$tmp" kserve-llmisvc-crd; \
+	rm -rf "$$tmp"
 
 .PHONY: helm-install
 helm-install: helm-deps ## Install the provider using Helm.

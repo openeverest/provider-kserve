@@ -80,7 +80,7 @@ Models are pulled from the URI given in the component parameters (`hf://`, `s3:/
 ```bash
 git clone https://github.com/openeverest/provider-kserve.git
 cd provider-kserve
-make helm-deps   # helm dependency build (adds the jetstack repo for cert-manager)
+make helm-deps   # helm dependency update (adds the jetstack repo for cert-manager)
 helm install provider-kserve charts/provider-kserve --namespace everest-system
 ```
 
@@ -104,8 +104,10 @@ Uninstall:
 helm uninstall provider-kserve --namespace everest-system
 ```
 
-Uninstalling the chart does **not** delete running `Instance` resources, and never removes
-the KServe CRDs (see [KServe CRDs](#kserve-crds)).
+Uninstalling the chart does **not** delete running `Instance` resources. It **does**
+delete the KServe CRDs (and every `InferenceService` / `LLMInferenceService` in the
+cluster) unless you installed with `kserveCrds.enabled=false`. See
+[KServe CRDs](#kserve-crds).
 
 ## Usage
 
@@ -543,6 +545,7 @@ reconcile them. The controllers that do are bundled as Helm subchart dependencie
 
 | Dependency | Reconciles / provides | Toggle |
 |---|---|---|
+| `kserve-crd` / `kserve-llmisvc-crd` | KServe CRDs | `kserveCrds.enabled` |
 | `kserve-resources` | `InferenceService` (predictor) | `kserveResources.enabled` |
 | `kserve-llmisvc-resources` | `LLMInferenceService` (llm) | `kserveLlmisvcResources.enabled` |
 | `kserve-runtime-configs` | `ClusterServingRuntime`s (predictor) | `kserveRuntimeConfigs.enabled` |
@@ -570,50 +573,42 @@ within one release.
 Vendor the dependencies before installing from a checkout:
 
 ```bash
-make helm-deps   # helm dependency build (adds the jetstack repo for cert-manager)
+make helm-deps   # helm dependency update (adds the jetstack repo for cert-manager)
 ```
 
 ## KServe CRDs
 
 Installing the provider chart also installs the KServe CustomResourceDefinitions the provider
 translates `Instance`s into (`InferenceService`, `LLMInferenceService`, and their supporting
-kinds). The CRDs are **vendored** into the chart's
-[`crds/`](charts/provider-kserve/crds/) directory rather than pulled in as templated subchart
-dependencies.
+kinds). They come from the `kserve-crd` and `kserve-llmisvc-crd` subcharts, pinned to the
+same version as the controller charts in [`Chart.yaml`](charts/provider-kserve/Chart.yaml).
 
-### Why `crds/` instead of a subchart
+Because they are Helm-release-tracked resources:
 
-Helm handles a chart's `crds/` directory specially: it installs the CRDs if they are absent,
-**skips** them if they already exist (no error), and **never deletes** them on
-`helm uninstall`. This is the same mechanism the `valkey-operator` chart uses for its CRDs.
+- `helm upgrade` updates the schemas (no out-of-band `kubectl apply`).
+- `helm uninstall` **deletes the CRDs**, which cascades to every object of those kinds
+  in the cluster — including ones this release did not create.
 
-The upstream `kserve-crd` / `kserve-llmisvc-crd` charts instead ship their CRDs under
-`templates/`, which makes them Helm-release-tracked resources. In a dev/test loop that is
-fragile: on uninstall Helm tries to delete the CRDs, but CRs left behind by tests keep
-finalizers (there is no KServe controller running to clear them), so the deletion stalls and
-the CRDs are orphaned. The next install then fails with `... already exists`, because Helm
-will not adopt pre-existing resources on a fresh install. Vendoring the CRDs under `crds/`
-avoids this entirely.
-
-### Keeping the CRDs up to date
-
-The CRDs are copied from the local KServe charts checkout (`../kserve/charts`, via the
-`KSERVE_CHARTS` Makefile variable) by `make sync-crds`, which runs automatically as part of
-`make generate`. The `LLMInferenceServiceConfig` presets are vendored the same way by
-`make sync-llm-presets` (into `files/llmisvcconfigs/`). When you bump the KServe version,
-re-run `make generate` and commit the refreshed `crds/` and `files/`. `make verify` fails in
-CI if they drift.
+Set `kserveCrds.enabled=false` when the cluster already has the CRDs (shared cluster,
+BYO-KServe, or a previous install that left them behind). This release then never
+creates, upgrades, or deletes them.
 
 ```bash
-make sync-crds         # refresh charts/provider-kserve/crds/ from $(KSERVE_CHARTS)
-make sync-llm-presets  # refresh charts/provider-kserve/files/ from $(KSERVE_CHARTS)
+helm install provider-kserve charts/provider-kserve --namespace everest-system \
+  --set kserveCrds.enabled=false
 ```
 
-Helm does **not** upgrade CRDs already present in a cluster from `crds/`. To roll out CRD
-schema changes to an existing cluster, apply them out of band:
+A cluster that already has these CRDs from an older vendored `crds/` install cannot
+adopt them into a new release. Either keep the toggle off, or delete the CRDs (and
+every CR of those kinds) before upgrading.
+
+The `LLMInferenceServiceConfig` presets are still vendored by `make sync-llm-presets`
+into `files/llmisvcconfigs/`. When you bump the KServe version, bump the five KServe
+entries in `Chart.yaml` together and re-run `make generate` for the preset file.
 
 ```bash
-kubectl apply --server-side -f charts/provider-kserve/crds/
+make helm-deps         # pull the CRD and controller charts at the Chart.yaml versions
+make sync-llm-presets  # refresh charts/provider-kserve/files/ from $(KSERVE_CHARTS)
 ```
 
 ## Development
@@ -624,7 +619,7 @@ cluster for you.
 
 ```bash
 make dev-up             # local k3d cluster + Tilt dev environment
-make generate           # RBAC, provider spec, vendored CRDs and presets, Helm chart sync
+make generate           # RBAC, provider spec, vendored presets, Helm chart sync
 make run                # run the provider locally against the cluster
 make test               # unit tests
 make test-reconcile     # fast chainsaw suites under test/reconcile/
@@ -659,7 +654,7 @@ and code generation are documented once for all providers in
 | `internal/provider/` | `ProviderInterface` implementation, AI Gateway wiring, RBAC markers |
 | `internal/common/` | Component name constants |
 | `definition/` | Provider identity, component types, versions, topologies |
-| `charts/provider-kserve/` | Helm chart (`generated/`, `crds/` and `files/` are produced by `make generate`) |
+| `charts/provider-kserve/` | Helm chart (`generated/` and `files/` are produced by `make generate`) |
 | `config/rbac/role.yaml` | Generated `ClusterRole` — do not edit |
 | `docs/` | Deployment, TLS and observability guides, Grafana dashboards |
 | `test/reconcile/` | Fast chainsaw suites (`llm`, `predictor`): the CR the provider derives, and its garbage collection |
