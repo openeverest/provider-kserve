@@ -1,4 +1,11 @@
 # Predictor topology definition.
+#
+# DISABLED: this file is intentionally named `topology.yaml.disabled` so the
+# definition assembler skips it, hiding the `predictor` topology from the UI
+# topology list. The predictor code (types.go, internal/provider, tests) is kept
+# for later. To re-enable, rename this file back to `topology.yaml` and run
+# `make generate`.
+#
 # Wraps KServe InferenceService (serving.kserve.io/v1beta1) for general
 # predictive model serving (sklearn, pytorch, tensorflow, xgboost, onnx,
 # triton, huggingface, ...). KServe auto-selects a ServingRuntime from the

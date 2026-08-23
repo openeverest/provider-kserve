@@ -115,9 +115,6 @@ spec:
               format: int32
               type: integer
           type: object
-    predictor:
-      components:
-        predictor: {}
   uiSchema:
     llm:
       sections:
@@ -431,61 +428,6 @@ spec:
         - disaggregation
         - observability
         - advanced
-    predictor:
-      sections:
-        basicInfo:
-          components:
-            modelFormat:
-              fieldParams:
-                label: Model Format
-                placeholder: sklearn
-              path: spec.components.predictor.parameters.modelFormat
-              uiType: text
-              validation:
-                required: true
-            runtimeVersion:
-              fieldParams:
-                label: Runtime Version
-              path: spec.components.predictor.parameters.runtimeVersion
-              uiType: text
-            storageURI:
-              fieldParams:
-                label: Model Storage URI
-                placeholder: gs://kfserving-examples/models/sklearn/1.0/model
-              path: spec.components.predictor.parameters.storageURI
-              uiType: text
-              validation:
-                required: true
-            version:
-              fieldParams:
-                label: KServe Version
-              path: spec.components.predictor.version
-              uiType: select
-          description: Configure the model to serve.
-          label: Basic Information
-        scaling:
-          components:
-            maxReplicas:
-              fieldParams:
-                label: Max Replicas
-              path: spec.components.predictor.parameters.maxReplicas
-              uiType: number
-              validation:
-                max: 32
-                min: 0
-            minReplicas:
-              fieldParams:
-                label: Min Replicas
-              path: spec.components.predictor.parameters.minReplicas
-              uiType: number
-              validation:
-                max: 32
-                min: 0
-          description: Configure autoscaling bounds for the predictor.
-          label: Scaling
-      sectionsOrder:
-        - basicInfo
-        - scaling
   versions:
     - components:
         llmEngine: 0.25.1
