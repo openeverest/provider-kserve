@@ -223,6 +223,9 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 | `tokenLimitPerHour` | int32 | Per-user, per-model hourly token quota. Only valid with Envoy AI Gateway. Defaults to 1000 when a Redis/Valkey rate-limit backend is configured. |
 | `enablePrefill` | bool | Enable disaggregated serving with a separate prefill workload. |
 | `prefillReplicas` | int32 | Replicas for the prefill workload (when `enablePrefill` is true). |
+| `enableMetrics` | bool | Emit a vLLM PodMonitor for this instance (`/metrics`). Defaults to enabled. |
+| `enableTracing` | bool | Enable KServe distributed tracing (OTLP) across gateway/scheduler/model. Disabled by default. |
+| `tracingEndpoint` | string | Optional OTLP exporter endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`); used only when `enableTracing` is true. |
 
 ### Accessing the model
 

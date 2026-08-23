@@ -59,6 +59,17 @@ type LlmTopologyParameters struct {
 	// EnableMetrics emits a Prometheus Operator PodMonitor for this instance's
 	// vLLM pods (/metrics). Nil/unset defaults to true for backward compatibility.
 	EnableMetrics *bool `json:"enableMetrics,omitempty"`
+
+	// EnableTracing turns on KServe's built-in distributed tracing (OTLP) across
+	// the gateway, scheduler and model components. Disabled by default. When
+	// enabled without an endpoint, KServe applies its default OTLP exporter,
+	// sampler and sampler-arg settings.
+	EnableTracing bool `json:"enableTracing,omitempty"`
+
+	// TracingEndpoint overrides the OTLP exporter endpoint
+	// (OTEL_EXPORTER_OTLP_ENDPOINT). Only used when EnableTracing is true; empty
+	// keeps KServe's default collector endpoint.
+	TracingEndpoint string `json:"tracingEndpoint,omitempty"`
 }
 
 // MetricsEnabled reports whether this instance should emit a vLLM PodMonitor.
@@ -124,6 +135,11 @@ func (t *LlmTopologyParameters) UnmarshalJSON(data []byte) error {
 		}
 		t.PrefillReplicas = &n
 	}
+	if v, ok := raw["tracingEndpoint"]; ok && string(v) != "null" {
+		if err := json.Unmarshal(v, &t.TracingEndpoint); err != nil {
+			return fmt.Errorf("tracingEndpoint: %w", err)
+		}
+	}
 	var err error
 	if t.EnableGatewayRouting, err = unmarshalBoolFlag(raw, "enableGatewayRouting"); err != nil {
 		return err
@@ -135,6 +151,9 @@ func (t *LlmTopologyParameters) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if t.EnableMetrics, err = unmarshalOptionalBoolFlag(raw, "enableMetrics"); err != nil {
+		return err
+	}
+	if t.EnableTracing, err = unmarshalBoolFlag(raw, "enableTracing"); err != nil {
 		return err
 	}
 	return nil
