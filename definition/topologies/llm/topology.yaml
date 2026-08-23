@@ -349,8 +349,33 @@ ui:
               value: "true"
             - label: Disabled
               value: "false"
+        enableTracing:
+          uiType: select
+          path: spec.topology.parameters.enableTracing
+          fieldParams:
+            label: Distributed tracing (OTLP)
+            defaultValue: "false"
+            helperText: >-
+              Enables KServe distributed tracing across the gateway, scheduler
+              and model components. Requires an OpenTelemetry collector.
+            options:
+            - label: Disabled
+              value: "false"
+            - label: Enabled
+              value: "true"
+        tracingEndpoint:
+          uiType: text
+          path: spec.topology.parameters.tracingEndpoint
+          fieldParams:
+            label: OTLP exporter endpoint
+            placeholder: http://otel-collector:4317
+            helperText: >-
+              Optional OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT). Only used
+              when tracing is enabled; empty keeps KServe's default collector.
       componentsOrder:
       - enableMetrics
+      - enableTracing
+      - tracingEndpoint
     advanced:
       label: Advanced
       description: >-

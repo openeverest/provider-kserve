@@ -111,6 +111,8 @@ spec:
               type: boolean
             enablePrefill:
               type: boolean
+            enableTracing:
+              type: boolean
             externalAccess:
               type: string
             prefillReplicas:
@@ -119,6 +121,8 @@ spec:
             tokenLimitPerHour:
               format: int32
               type: integer
+            tracingEndpoint:
+              type: string
           type: object
   uiSchema:
     llm:
@@ -302,8 +306,29 @@ spec:
                     value: "false"
               path: spec.topology.parameters.enableMetrics
               uiType: select
+            enableTracing:
+              fieldParams:
+                defaultValue: "false"
+                helperText: Enables KServe distributed tracing across the gateway, scheduler and model components. Requires an OpenTelemetry collector.
+                label: Distributed tracing (OTLP)
+                options:
+                  - label: Disabled
+                    value: "false"
+                  - label: Enabled
+                    value: "true"
+              path: spec.topology.parameters.enableTracing
+              uiType: select
+            tracingEndpoint:
+              fieldParams:
+                helperText: Optional OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT). Only used when tracing is enabled; empty keeps KServe's default collector.
+                label: OTLP exporter endpoint
+                placeholder: http://otel-collector:4317
+              path: spec.topology.parameters.tracingEndpoint
+              uiType: text
           componentsOrder:
             - enableMetrics
+            - enableTracing
+            - tracingEndpoint
           description: 'Configure Prometheus metrics for this model''s vLLM engine (per-instance PodMonitor). Envoy AI Gateway gen_ai metrics are cluster-wide: enabled automatically when the provider is installed with aiGateway.enabled and metrics.podMonitor.enabled — view them in Grafana (gateway dashboard).'
           label: Observability
         routing:

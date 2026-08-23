@@ -467,6 +467,16 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		spec.Prefill = prefill
 	}
 
+	// Distributed tracing. A present-but-empty TracingSpec enables KServe's
+	// default OTLP instrumentation; an endpoint override is applied when set.
+	if topo.EnableTracing {
+		tracing := &kservev1alpha2.TracingSpec{}
+		if ep := strings.TrimSpace(topo.TracingEndpoint); ep != "" {
+			tracing.ExporterEndpoint = ptr.To(ep)
+		}
+		spec.Tracing = tracing
+	}
+
 	// No deploymentMode annotation here: the llmisvc controller has no
 	// Knative path and never reads it (grep DeploymentMode under
 	// pkg/controller/v1alpha1/llmisvc — no hits). Only InferenceService uses it.
