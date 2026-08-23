@@ -69,6 +69,11 @@ spec:
         # Split the model across GPUs on a node.
         tensorParallelSize: 1
         # pipelineParallelSize: 1
+        # Data parallelism (replica layout); common for Mixture-of-Experts
+        # models. Mutually exclusive with pipelineParallelSize.
+        # dataParallelSize: 2
+        # Expert parallelism for MoE models (Mixtral, DeepSeek, Qwen-MoE).
+        # expertParallel: enabled
         # Inherit and override base runtime configs.
         # baseRefs:
         #   - kserve-config-llm-decode-worker-data-parallel

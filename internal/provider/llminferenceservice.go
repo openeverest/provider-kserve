@@ -88,6 +88,10 @@ func validateLLM(c *controller.Context) error {
 	if comp.Replicas != nil && *comp.Replicas < 0 {
 		return fmt.Errorf("%s replicas must not be negative", common.ComponentLlmEngine)
 	}
+	if params.DataParallelSize != nil && *params.DataParallelSize > 1 &&
+		params.PipelineParallelSize != nil && *params.PipelineParallelSize > 1 {
+		return fmt.Errorf("%s.parameters: dataParallelSize and pipelineParallelSize are mutually exclusive; set only one", common.ComponentLlmEngine)
+	}
 	if strings.TrimSpace(params.Config) != "" {
 		if _, err := parseLLMConfigSpec(params.Config); err != nil {
 			return err
@@ -367,12 +371,26 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		spec.Replicas = comp.Replicas
 	}
 
-	// Runtime parallelism.
-	if params.TensorParallelSize != nil || params.PipelineParallelSize != nil {
-		spec.Parallelism = &kservev1alpha2.ParallelismSpec{
-			Tensor:   params.TensorParallelSize,
-			Pipeline: params.PipelineParallelSize,
+	// Runtime parallelism. KServe rejects pipeline and data parallelism set
+	// together, and requires dataLocal whenever data is set. Treat data
+	// parallelism as requested only when dataParallelSize > 1 (1 is a no-op) so
+	// the default UI value never displaces pipeline parallelism. For a
+	// single-node data-parallel layout dataLocal mirrors data.
+	expertParallel := strings.EqualFold(params.ExpertParallel, components.ExpertParallelEnabled)
+	dataParallel := params.DataParallelSize != nil && *params.DataParallelSize > 1
+	if params.TensorParallelSize != nil || params.PipelineParallelSize != nil ||
+		dataParallel || expertParallel {
+		p := &kservev1alpha2.ParallelismSpec{
+			Tensor: params.TensorParallelSize,
+			Expert: expertParallel,
 		}
+		if dataParallel {
+			p.Data = params.DataParallelSize
+			p.DataLocal = params.DataParallelSize
+		} else {
+			p.Pipeline = params.PipelineParallelSize
+		}
+		spec.Parallelism = p
 	}
 
 	// Optional pod resource requirements from the component spec. KServe

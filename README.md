@@ -194,6 +194,8 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 | `modelName` | string | Name advertised in the request `model` field. Defaults to the Instance name. |
 | `tensorParallelSize` | int32 | vLLM tensor parallelism (`--tensor-parallel-size`). |
 | `pipelineParallelSize` | int32 | vLLM pipeline parallelism (`--pipeline-parallel-size`). |
+| `dataParallelSize` | int32 | vLLM data parallelism (`ParallelismSpec.data`); common for Mixture-of-Experts replica layouts. Mutually exclusive with `pipelineParallelSize`; the provider mirrors it into `dataLocal` for a single-node layout. |
+| `expertParallel` | string | `enabled` / `disabled` (default) expert parallelism (`ParallelismSpec.expert`) for MoE models (Mixtral, DeepSeek, Qwen-MoE). |
 | `computeProfile` | string | `gpu` (default) uses the bundled CUDA presets; `cpu` composes the CPU-only `kserve-config-llm-cpu` config via `baseRefs`. See [Compute profile](#compute-profile-cpu-serving). |
 | `kvCacheSpaceGi` | int32 | Caps `VLLM_CPU_KVCACHE_SPACE` on the CPU profile. |
 | `baseRefs` | []string | `LLMInferenceServiceConfig` names to inherit/merge. |

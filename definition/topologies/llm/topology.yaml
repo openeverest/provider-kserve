@@ -92,6 +92,26 @@ ui:
           validation:
             min: 1
             max: 16
+        dataParallelSize:
+          uiType: number
+          path: spec.components.llmEngine.parameters.dataParallelSize
+          fieldParams:
+            label: Data Parallel Size
+            defaultValue: 1
+          validation:
+            min: 1
+            max: 16
+        expertParallel:
+          uiType: select
+          path: spec.components.llmEngine.parameters.expertParallel
+          fieldParams:
+            label: Expert Parallelism (MoE)
+            defaultValue: disabled
+            options:
+            - label: Disabled
+              value: disabled
+            - label: Enabled
+              value: enabled
     runtime:
       label: Runtime
       description: Choose the compute profile and size the model server. GPU uses the default CUDA vLLM image; CPU composes a CPU-only vLLM config (via baseRefs) so the model runs without a GPU. CPU/Memory are applied to the model server container per instance.

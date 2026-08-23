@@ -55,6 +55,16 @@ type VllmCustomSpec struct {
 	// (maps to the runtime --pipeline-parallel-size).
 	PipelineParallelSize *int32 `json:"pipelineParallelSize,omitempty"`
 
+	// DataParallelSize configures vLLM data parallelism (maps to the runtime
+	// ParallelismSpec.Data). Use to run multiple model replicas that share the
+	// same expert layers, the common layout for Mixture-of-Experts models.
+	DataParallelSize *int32 `json:"dataParallelSize,omitempty"`
+
+	// ExpertParallel toggles expert parallelism (maps to ParallelismSpec.Expert)
+	// for Mixture-of-Experts models (e.g. Mixtral, DeepSeek, Qwen-MoE):
+	// "disabled" (default) or "enabled". Typically combined with dataParallelSize.
+	ExpertParallel string `json:"expertParallel,omitempty"`
+
 	// ComputeProfile selects the compute profile for the workload. "cpu"
 	// composes the CPU-only LLMInferenceServiceConfig (via baseRefs) so the
 	// model runs without a GPU; any other value (default "gpu") uses the bundled
@@ -108,6 +118,11 @@ type VllmCustomSpec struct {
 const (
 	LoraDeploymentDisabled = "disabled"
 	LoraDeploymentEnabled  = "enabled"
+)
+
+const (
+	ExpertParallelDisabled = "disabled"
+	ExpertParallelEnabled  = "enabled"
 )
 
 // ModelServerCustomSpec defines custom configuration for the modelServer

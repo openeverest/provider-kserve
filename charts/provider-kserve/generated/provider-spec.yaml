@@ -25,8 +25,13 @@ spec:
               type: string
             config:
               type: string
+            dataParallelSize:
+              format: int32
+              type: integer
             disableStorageInitializer:
               type: boolean
+            expertParallel:
+              type: string
             kvCacheSpaceGi:
               format: int32
               type: integer
@@ -390,6 +395,26 @@ spec:
           label: Runtime
         scaling:
           components:
+            dataParallelSize:
+              fieldParams:
+                defaultValue: 1
+                label: Data Parallel Size
+              path: spec.components.llmEngine.parameters.dataParallelSize
+              uiType: number
+              validation:
+                max: 16
+                min: 1
+            expertParallel:
+              fieldParams:
+                defaultValue: disabled
+                label: Expert Parallelism (MoE)
+                options:
+                  - label: Disabled
+                    value: disabled
+                  - label: Enabled
+                    value: enabled
+              path: spec.components.llmEngine.parameters.expertParallel
+              uiType: select
             pipelineParallelSize:
               fieldParams:
                 defaultValue: 1
