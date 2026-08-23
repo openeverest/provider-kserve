@@ -38,7 +38,7 @@ install_openeverest = str2bool(os.getenv('INSTALL_OPENEVEREST', 'true'))
 
 # Released OpenEverest core version to install. Defaults to the OpenEverest v2
 # dev release (published as a prerelease chart). Empty means latest prerelease.
-openeverest_version = os.getenv('OPENEVEREST_VERSION', '2.0.0-dev.1')
+openeverest_version = os.getenv('OPENEVEREST_VERSION', '2.0.0-dev.2')
 
 # Helm repository that hosts the OpenEverest core chart.
 openeverest_helm_repo = os.getenv(
@@ -161,7 +161,7 @@ if install_openeverest:
         labels=['openeverest'],
     )
 
-    # Upgrade OpenEverest CRDs after core install. The published 2.0.0-dev.1
+    # Upgrade OpenEverest CRDs after core install. The published 2.0.0-dev.2
     # chart still ships pre-#2583 schemas (customSpecSchema/configSchema); the
     # provider emits parametersSchema and needs the release-2.0 CRDs.
     openeverest_crd_base = 'https://raw.githubusercontent.com/openeverest/openeverest/{0}/config/crd/bases'.format(
@@ -282,11 +282,10 @@ local_resource(
 # helm_resource also guarantees the Provider CR is applied only after the core
 # CRDs exist.
 #
-# The KServe CRDs are vendored under charts/provider-kserve/crds/ and installed
-# automatically by Helm's crds/ handling (idempotent, never deleted on
-# uninstall). The KServe controllers reconcile the InferenceService /
-# LLMInferenceService resources the provider creates; cert-manager is installed
-# separately above, so the bundled copy is disabled here.
+# First install: KServe CRDs (subcharts) + llmisvc controller. kserve-resources
+# is off — it creates a ClusterStorageContainer and Helm cannot map that kind
+# until the CRD exists. Post-install turns kserve-resources on, then the
+# webhook-gated resources. cert-manager is its own release, bundled copy off.
 
 provider_resource_deps = ['provider-build', 'provider-helm-deps']
 if install_openeverest:
@@ -300,6 +299,8 @@ provider_flags = [
     '--set', 'securityContext.readOnlyRootFilesystem=false',
     # cert-manager is installed as its own release above.
     '--set', 'cert-manager.enabled=false',
+    '--set', 'kserveCrds.enabled=true',
+    '--set', 'kserveResources.enabled=false',
     # Disable resources that trigger webhooks (ClusterServingRuntimes,
     # LLMInferenceServiceConfigs). They will be applied after controllers are
     # ready via the post-install resource below.
@@ -335,26 +336,35 @@ helm_resource(
 # ===========================
 # Post-install: enable runtime configs after controllers are ready
 # ===========================
-# The KServe controllers register webhooks that validate ClusterServingRuntimes
-# and LLMInferenceServiceConfigs. On a fresh install the controllers aren't
-# ready yet, so those resources are disabled in the initial install and enabled
-# here once the webhook services have endpoints.
-post_install_cmd = ('echo "Waiting for KServe controllers to exist..." && ' +
-    'for i in $(seq 1 90); do kubectl get deployment/kserve-controller-manager -n {ns} >/dev/null 2>&1 && break; echo "Attempt $i: not found yet, sleeping 5s..."; sleep 5; done && ' +
-    'kubectl get deployment/kserve-controller-manager -n {ns} || (echo "ERROR: kserve-controller-manager never appeared" && exit 1) && ' +
-    'kubectl wait --for=condition=available deployment/kserve-controller-manager -n {ns} --timeout=300s && ' +
-    'kubectl wait --for=condition=available deployment/llmisvc-controller-manager -n {ns} --timeout=300s && ' +
-    'sleep 10 && ' +
-    # Preserve the image repository/tag injected by Tilt's helm_resource.
-    # Without --reuse-values this second upgrade resets the Deployment to the
-    # chart's default image, so an older provider reconciles away local changes.
-    'helm upgrade provider-kserve {chart} --namespace {ns} --reuse-values ' +
-    '--set image.pullPolicy=IfNotPresent ' +
-    '--set securityContext.readOnlyRootFilesystem=false ' +
-    '--set cert-manager.enabled=false ' +
-    '--set kserveRuntimeConfigs.enabled=true ' +
-    '--set llmPresets.enabled=true ' +
-    '--set cpuProfile.enabled=true').format(ns=provider_namespace, chart=chart_dir)
+# Enable kserve-resources now that the CRDs exist, wait for both controllers,
+# then enable resources their webhooks validate (ClusterServingRuntimes,
+# LLMInferenceServiceConfigs).
+post_install_cmd = (
+    'helm upgrade provider-kserve {chart} --namespace {ns} --reuse-values '
+    + '--set image.pullPolicy=IfNotPresent '
+    + '--set securityContext.readOnlyRootFilesystem=false '
+    + '--set cert-manager.enabled=false '
+    + '--set kserveCrds.enabled=true '
+    + '--set kserveResources.enabled=true '
+    + '--set kserveRuntimeConfigs.enabled=false '
+    + '--set llmPresets.enabled=false '
+    + '--set cpuProfile.enabled=false && '
+    + 'echo "Waiting for KServe controllers to exist..." && '
+    + 'for i in $(seq 1 90); do kubectl get deployment/kserve-controller-manager -n {ns} >/dev/null 2>&1 && break; echo "Attempt $i: not found yet, sleeping 5s..."; sleep 5; done && '
+    + 'kubectl get deployment/kserve-controller-manager -n {ns} || (echo "ERROR: kserve-controller-manager never appeared" && exit 1) && '
+    + 'kubectl wait --for=condition=available deployment/kserve-controller-manager -n {ns} --timeout=300s && '
+    + 'kubectl wait --for=condition=available deployment/llmisvc-controller-manager -n {ns} --timeout=300s && '
+    + 'sleep 10 && '
+    + 'helm upgrade provider-kserve {chart} --namespace {ns} --reuse-values '
+    + '--set image.pullPolicy=IfNotPresent '
+    + '--set securityContext.readOnlyRootFilesystem=false '
+    + '--set cert-manager.enabled=false '
+    + '--set kserveCrds.enabled=true '
+    + '--set kserveResources.enabled=true '
+    + '--set kserveRuntimeConfigs.enabled=true '
+    + '--set llmPresets.enabled=true '
+    + '--set cpuProfile.enabled=true'
+).format(ns=provider_namespace, chart=chart_dir)
 
 if enable_ai_gateway:
     post_install_cmd = post_install_cmd + ' --set aiGateway.enabled=true --set envoy-ai-gateway.envoyGateway.namespace={0}'.format(provider_namespace)

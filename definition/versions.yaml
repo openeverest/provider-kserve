@@ -1,36 +1,43 @@
 # Component type version catalog and version bundles.
-# Add new versions here when KServe / vLLM releases are available.
-# Mark exactly one version per type as `default: true`.
 #
-# Note: KServe auto-selects the ServingRuntime container for the predictor from
-# the model format, and the llmEngine runtime is managed by the LLMInferenceService
-# controller. These images are catalog metadata surfaced to the UI version picker
-# and used for bundle resolution; they are not injected into the CRs directly.
+# This file must describe what the chart actually installs. The chart pins the
+# KServe subcharts in charts/provider-kserve/Chart.yaml; a bundle here that
+# names a different KServe version is a claim the provider cannot honour.
+# TestCatalogMatchesChart (internal/common/versions_test.go) fails the build
+# when the two drift, so bump this file in the same PR as the subcharts.
+#
+# Mark exactly one version per type as `default: true`, and exactly one bundle.
+#
+# Note: these images are catalog metadata surfaced to the UI version picker and
+# used for bundle resolution; they are not injected into the CRs directly.
+# KServe auto-selects the ServingRuntime container for the predictor from the
+# model format, and the llmEngine runtime is managed by the LLMInferenceService
+# controller through the bundled presets.
 
 componentTypes:
   vllm:
     versions:
-      - version: "0.11.0"
-        image: vllm/vllm-openai:v0.11.0
+      # The vLLM build the provider actually controls: the CPU profile image
+      # (charts/provider-kserve/values.yaml, cpuProfile.image). The bundled GPU
+      # presets run KServe's own runtime image (ghcr.io/llm-d/llm-d-cuda:v0.8.0
+      # as of KServe v0.20.0), which is not selectable through this catalog.
+      - version: "0.25.1"
+        image: vllm/vllm-openai-cpu:v0.25.1
         default: true
-      - version: "0.10.1"
-        image: vllm/vllm-openai:v0.10.1
   modelServer:
     versions:
-      - version: "0.15.0"
-        image: kserve/kserve-controller:v0.15.0
+      - version: "0.20.0"
+        image: kserve/kserve-controller:v0.20.0
         default: true
-      - version: "0.14.1"
-        image: kserve/kserve-controller:v0.14.1
 
 # Version bundles: curated, mutually compatible sets keyed to a KServe release.
+#
+# One bundle, because the chart bundles exactly one set of KServe controllers.
+# Offering a choice the chart cannot install would be fiction. Add a bundle here
+# only when the chart can actually deliver it.
 versions:
-  - name: "0.15"
+  - name: "0.20"
     default: true
     components:
-      llmEngine: "0.11.0"
-      predictor: "0.15.0"
-  - name: "0.14"
-    components:
-      llmEngine: "0.10.1"
-      predictor: "0.14.1"
+      llmEngine: "0.25.1"
+      predictor: "0.20.0"

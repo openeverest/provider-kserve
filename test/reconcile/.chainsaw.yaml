@@ -1,0 +1,25 @@
+---
+# Chainsaw configuration for the reconcile suite: fast tests of the provider's
+# own logic - the spec of the CR it derives from an Instance, and garbage
+# collection of that CR when the Instance is deleted. Runs on every PR.
+#
+# Nothing here waits on a model pod, so seconds-scale timeouts are correct.
+# Tests that wait on real serving belong in ../e2e (minutes-scale timeouts).
+apiVersion: chainsaw.kyverno.io/v1alpha2
+kind: Configuration
+metadata:
+  name: reconcile
+spec:
+  timeouts:
+    apply: 30s
+    assert: 60s
+    delete: 30s
+    error: 30s
+    exec: 60s
+    cleanup: 60s
+  cleanup:
+    skipDelete: false
+  report:
+    format: XML
+    name: chainsaw-report
+    path: /tmp

@@ -6,9 +6,16 @@ metadata:
 spec:
   description: |
     Lifecycle of a predictor Instance: create it, verify the provider derives a
-    KServe InferenceService, simulate the KServe controller marking the service
-    ready, verify the Instance reaches Ready, and verify the InferenceService is
-    garbage collected on deletion.
+    KServe InferenceService, and verify the InferenceService is garbage
+    collected on deletion.
+
+    Readiness is deliberately NOT asserted here. The real KServe controller
+    owns InferenceService.status and rewrites it within a second, so patching
+    the status to fake Ready is a race the test only sometimes wins (the fake
+    Ready lived <1s in run 32052071713 before KServe reset it to
+    IngressReady=False). Asserting readiness truthfully means waiting for a
+    model pod to actually serve, which belongs in an e2e suite with a real
+    model and real timeouts, not in the per-PR suite.
   catch:
     - script:
         content: kubectl -n $NAMESPACE get instance,inferenceservice -o yaml
@@ -19,17 +26,6 @@ spec:
             file: 00-create-predictor.yaml
         - assert:
             file: 00-assert.yaml
-
-    # Simulate the KServe controller marking the InferenceService ready so the
-    # provider can propagate a Ready phase back to the Instance.
-    - name: predictor-ready
-      try:
-        - script:
-            content: |
-              kubectl patch inferenceservice/test-kserve-predictor --subresource status -n $NAMESPACE \
-                --type=merge -p '{"status":{"url":"http://test-kserve-predictor.'"$NAMESPACE"'.example.com","conditions":[{"type":"Ready","status":"True","lastTransitionTime":"2026-01-01T00:00:00Z"}]}}'
-        - assert:
-            file: 10-assert.yaml
 
     - name: delete-predictor
       try:

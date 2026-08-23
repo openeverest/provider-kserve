@@ -1,0 +1,21 @@
+# The provider must reconcile the Instance into a KServe InferenceService with
+# the requested model format, storage URI, and autoscaling bounds, in Standard
+# deployment mode (plain Deployment + HPA, no Knative).
+#
+# The provider writes "Standard" directly. Before that it wrote the deprecated
+# "RawDeployment", which KServe's defaulting webhook rewrote to "Standard" on
+# admission, so the stored annotation never matched what the provider sent.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: test-kserve-predictor
+  annotations:
+    serving.kserve.io/deploymentMode: Standard
+spec:
+  predictor:
+    minReplicas: 1
+    maxReplicas: 3
+    model:
+      modelFormat:
+        name: sklearn
+      storageUri: gs://kfserving-examples/models/sklearn/1.0/model
