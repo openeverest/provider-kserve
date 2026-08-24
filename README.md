@@ -74,6 +74,14 @@ Models are pulled from the URI given in the component parameters (`hf://`, `s3:/
 
 ## Installation
 
+> [!IMPORTANT]
+> **Prerequisites.** Besides an [OpenEverest](#what-this-is) installation, the KServe
+> controllers require **cert-manager** — they run admission webhooks whose certificates it
+> issues. The chart bundles cert-manager and installs it (with its CRDs) by default; when the
+> cluster already runs cert-manager, install with `--set cert-manager.enabled=false` to use the
+> existing one. Either way cert-manager **and its CRDs must be present** — unlike the KServe
+> CRDs, the chart does not vendor the cert-manager CRDs. See [KServe CRDs](#kserve-crds).
+
 Install the published chart from the GHCR OCI registry:
 
 ```bash
@@ -626,8 +634,9 @@ helm install provider-kserve oci://ghcr.io/openeverest/charts/provider-kserve \
 > with, this chart.
 
 The `LLMInferenceServiceConfig` presets are still vendored by `make sync-llm-presets`
-into `files/llmisvcconfigs/`. When you bump the KServe version, bump the four KServe
-entries in `Chart.yaml` together and re-run `make generate` for the preset file.
+into `files/llmisvcconfigs/`. When you bump the KServe version, bump the three KServe
+controller entries in `Chart.yaml` together (`sync-kserve-crds` pulls the matching CRDs)
+and re-run `make generate` for the preset file.
 
 ```bash
 make helm-deps         # vendor the CRDs into crds/ and the controller charts into charts/
