@@ -52,7 +52,7 @@ This provider has **not been released yet** — the table describes `main`.
 
 | provider-kserve | OpenEverest | KServe | Kubernetes |
 |---|---|---|---|
-| `main` | `>= 2.0.0-dev.2` | `0.20.x` | `1.30` – `1.34` |
+| `0.1.0` | `>= 2.0.0-dev.2` | `0.20.x` | `1.30` – `1.34` |
 
 ## Capabilities
 
