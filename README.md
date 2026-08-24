@@ -48,7 +48,7 @@ formerly called this mode `RawDeployment`.
 
 ## Compatibility
 
-This provider has **not been released yet** — the table describes `main`.
+The latest release is `0.1.0`.
 
 | provider-kserve | OpenEverest | KServe | Kubernetes |
 |---|---|---|---|
@@ -74,8 +74,16 @@ Models are pulled from the URI given in the component parameters (`hf://`, `s3:/
 
 ## Installation
 
-> [!NOTE]
-> There is no published chart yet. Until the first release, install from a checkout.
+Install the published chart from the GHCR OCI registry:
+
+```bash
+helm install provider-kserve \
+  oci://ghcr.io/openeverest/charts/provider-kserve \
+  --version 0.1.0 --namespace everest-system
+```
+
+<details>
+<summary>Install from a checkout (development)</summary>
 
 ```bash
 git clone https://github.com/openeverest/provider-kserve.git
@@ -85,6 +93,7 @@ helm install provider-kserve charts/provider-kserve --namespace everest-system
 ```
 
 `make helm-install` does the same thing against your current kube context.
+</details>
 
 - The KServe controllers are bundled as chart dependencies and installed by default — see
   [Bundled KServe controllers](#bundled-kserve-controllers).
@@ -104,10 +113,9 @@ Uninstall:
 helm uninstall provider-kserve --namespace everest-system
 ```
 
-Uninstalling the chart does **not** delete running `Instance` resources. It **does**
-delete the KServe CRDs (and every `InferenceService` / `LLMInferenceService` in the
-cluster) unless you installed with `kserveCrds.enabled=false`. See
-[KServe CRDs](#kserve-crds).
+Uninstalling the chart does **not** delete running `Instance` resources, and it does
+**not** delete the KServe CRDs (they are installed from the chart's `crds/` directory,
+which Helm never removes). See [KServe CRDs](#kserve-crds).
 
 ## Usage
 
@@ -550,11 +558,13 @@ reconcile them. The controllers that do are bundled as Helm subchart dependencie
 
 | Dependency | Reconciles / provides | Toggle |
 |---|---|---|
-| `kserve-crd` / `kserve-llmisvc-crd` | KServe CRDs | `kserveCrds.enabled` |
 | `kserve-resources` | `InferenceService` (predictor) | `kserveResources.enabled` |
 | `kserve-llmisvc-resources` | `LLMInferenceService` (llm) | `kserveLlmisvcResources.enabled` |
 | `kserve-runtime-configs` | `ClusterServingRuntime`s (predictor) | `kserveRuntimeConfigs.enabled` |
 | `cert-manager` | webhook certificates for both | `cert-manager.enabled` |
+
+The KServe CRDs are **not** subchart dependencies — they are vendored into the chart's
+`crds/` directory (see [KServe CRDs](#kserve-crds)).
 
 The `kserve-runtime-configs` chart ships the `ClusterServingRuntime`s the InferenceService
 controller selects from by model format — without them the `predictor` topology has no runtime
@@ -585,34 +595,42 @@ make helm-deps   # helm dependency update (adds the jetstack repo for cert-manag
 
 Installing the provider chart also installs the KServe CustomResourceDefinitions the provider
 translates `Instance`s into (`InferenceService`, `LLMInferenceService`, and their supporting
-kinds). They come from the `kserve-crd` and `kserve-llmisvc-crd` subcharts, pinned to the
-same version as the controller charts in [`Chart.yaml`](charts/provider-kserve/Chart.yaml).
+kinds). `make helm-deps` vendors them from the `kserve-crd` and `kserve-llmisvc-crd` charts —
+pinned to the same version as the controller charts in
+[`Chart.yaml`](charts/provider-kserve/Chart.yaml) — into the chart's `crds/` directory.
 
-Because they are Helm-release-tracked resources:
+Helm installs `crds/` **before** rendering any templates, so a single `helm install`
+can create the CRs this chart ships (`ClusterServingRuntime`, `ClusterStorageContainer`,
+`LLMInferenceServiceConfig`). Keeping them out of `templates/` is deliberate: Helm renders a
+subchart's templates in the same pass as those CRs, which fails on a fresh cluster with
+`resource mapping not found ... ensure CRDs are installed first`.
 
-- `helm upgrade` updates the schemas (no out-of-band `kubectl apply`).
-- `helm uninstall` **deletes the CRDs**, which cascades to every object of those kinds
-  in the cluster — including ones this release did not create.
+The `crds/` mechanism has trade-offs to know about:
 
-Set `kserveCrds.enabled=false` when the cluster already has the CRDs (shared cluster,
-BYO-KServe, or a previous install that left them behind). This release then never
-creates, upgrades, or deletes them.
+- `helm uninstall` does **not** delete the CRDs (or the objects of those kinds). They are
+  left in place.
+- `helm upgrade` does **not** update the CRD schemas. When you bump the KServe version,
+  apply the new CRDs out of band with `kubectl apply -f charts/provider-kserve/crds/`
+  (or `--server-side`) after `make helm-deps`.
+- Skip installing them with `--skip-crds` when the cluster already has the CRDs (shared
+  cluster or BYO-KServe):
 
 ```bash
-helm install provider-kserve charts/provider-kserve --namespace everest-system \
-  --set kserveCrds.enabled=false
+helm install provider-kserve oci://ghcr.io/openeverest/charts/provider-kserve \
+  --version 0.1.0 --namespace everest-system --skip-crds
 ```
 
-A cluster that already has these CRDs from an older vendored `crds/` install cannot
-adopt them into a new release. Either keep the toggle off, or delete the CRDs (and
-every CR of those kinds) before upgrading.
+> [!NOTE]
+> The cert-manager CRDs are **not** bundled. The KServe controllers' `Certificate`
+> resources require them, so install cert-manager (with its CRDs) before, or alongside
+> with, this chart.
 
 The `LLMInferenceServiceConfig` presets are still vendored by `make sync-llm-presets`
-into `files/llmisvcconfigs/`. When you bump the KServe version, bump the five KServe
+into `files/llmisvcconfigs/`. When you bump the KServe version, bump the four KServe
 entries in `Chart.yaml` together and re-run `make generate` for the preset file.
 
 ```bash
-make helm-deps         # pull the CRD and controller charts at the Chart.yaml versions
+make helm-deps         # vendor the CRDs into crds/ and the controller charts into charts/
 make sync-llm-presets  # refresh charts/provider-kserve/files/ from $(KSERVE_CHARTS)
 ```
 

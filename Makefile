@@ -25,7 +25,8 @@ GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 CHART_DIR ?= charts/provider-kserve
 
 # Local KServe charts checkout used only by sync-llm-presets. Override to
-# point at a different checkout. The KServe CRDs come from Chart.yaml deps.
+# point at a different checkout. The KServe CRDs are vendored into the chart's
+# crds/ directory by sync-kserve-crds (pulled from the KServe OCI registry).
 KSERVE_CHARTS ?= ../kserve/charts
 
 .PHONY: help
@@ -125,22 +126,38 @@ docker-push: ## Push docker image.
 
 ##@ Helm
 
+# KServe CRD charts, vendored into the chart's crds/ directory by
+# sync-kserve-crds. They are NOT tracked as subchart dependencies: Helm applies
+# crds/ before rendering templates, so a single `helm install` can create the
+# CRs this chart ships (ClusterServingRuntime, ClusterStorageContainer,
+# LLMInferenceServiceConfig) without a two-phase install. Version follows the
+# KServe controller charts pinned in Chart.yaml.
+KSERVE_CRD_CHARTS ?= kserve-crd kserve-llmisvc-crd
+
 .PHONY: helm-deps
-helm-deps: ## Download/update Helm chart dependencies.
+helm-deps: yq sync-kserve-crds ## Download/update Helm chart dependencies.
 	helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
 	helm repo update jetstack >/dev/null 2>&1 || true
 	helm dependency update $(CHART_DIR)
-	@# Both official CRD charts emit clusterstoragecontainers. lookup only
-	@# skips a *different* Helm release, so one parent release would apply
-	@# the CRD twice. Drop the llmisvc copy; kserve-crd keeps it.
-	@# ponytail: ceiling is "upstream ships CSC in both charts"; delete this
-	@# strip if they split it out.
-	@tgz=$$(ls $(CHART_DIR)/charts/kserve-llmisvc-crd-*.tgz); \
-	tmp=$$(mktemp -d); \
-	COPYFILE_DISABLE=1 tar -xzf "$$tgz" -C "$$tmp"; \
-	rm -f "$$tmp/kserve-llmisvc-crd/templates/serving.kserve.io_clusterstoragecontainers.yaml"; \
-	COPYFILE_DISABLE=1 tar -czf "$$tgz" -C "$$tmp" kserve-llmisvc-crd; \
-	rm -rf "$$tmp"
+
+.PHONY: sync-kserve-crds
+sync-kserve-crds: yq ## Vendor the KServe CRDs into the chart's crds/ directory.
+	@ver=$$($(YQ) '.dependencies[] | select(.name == "kserve-resources") | .version' $(CHART_DIR)/Chart.yaml); \
+	echo "Vendoring KServe CRDs ($$ver) into $(CHART_DIR)/crds..."; \
+	rm -rf $(CHART_DIR)/crds $(CHART_DIR)/.crd-src; \
+	mkdir -p $(CHART_DIR)/crds $(CHART_DIR)/.crd-src; \
+	for c in $(KSERVE_CRD_CHARTS); do \
+		helm pull oci://ghcr.io/kserve/charts/$$c --version $$ver --untar --untardir $(CHART_DIR)/.crd-src >/dev/null; \
+		for f in $(CHART_DIR)/.crd-src/$$c/templates/*.yaml; do \
+			[ -e "$$f" ] || continue; \
+			grep -q '{{' "$$f" || cp "$$f" $(CHART_DIR)/crds/; \
+		done; \
+		if [ -d "$(CHART_DIR)/.crd-src/$$c/files" ]; then \
+			cp $(CHART_DIR)/.crd-src/$$c/files/*.yaml $(CHART_DIR)/crds/ 2>/dev/null || true; \
+		fi; \
+	done; \
+	rm -rf $(CHART_DIR)/.crd-src; \
+	echo "Done."
 
 .PHONY: helm-install
 helm-install: helm-deps ## Install the provider using Helm.

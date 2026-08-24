@@ -34,3 +34,6 @@ Thumbs.db
 # Helm chart dependencies (downloaded by `helm dep up`)
 charts/provider-kserve/charts/
 charts/provider-kserve/Chart.lock
+# KServe CRDs vendored into crds/ by `make sync-kserve-crds`
+charts/provider-kserve/crds/
+charts/provider-kserve/.crd-src/
