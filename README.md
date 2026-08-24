@@ -86,7 +86,7 @@ Install the published chart from the GHCR OCI registry:
 
 ```bash
 helm install provider-kserve \
-  oci://ghcr.io/openeverest/charts/provider-kserve \
+  oci://ghcr.io/openeverest/charts/provider-kserve
 ```
 
 <details>
