@@ -1,0 +1,80 @@
+name: E2E Tests
+
+# Manually gated: never runs on every PR push. Maintainers add the `run-e2e`
+# label when the change is worth ~10-20 minutes of runner time, or dispatch
+# from the Actions tab on a chosen branch.
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to test
+        required: false
+        default: main
+        type: string
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+env:
+  K3D_VERSION: v5.8.3
+  TILT_VERSION: 0.37.5
+  CHAINSAW_VERSION: v0.2.15
+
+jobs:
+  e2e:
+    name: E2E Tests
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-e2e'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.event.pull_request.head.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install k3d
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/k3d-io/k3d/${K3D_VERSION}/install.sh" \
+            | TAG="${K3D_VERSION}" bash
+          k3d version
+
+      - name: Install Tilt
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/tilt-dev/tilt/v${TILT_VERSION}/scripts/install.sh" \
+            | bash
+          tilt version
+
+      - name: Install chainsaw
+        run: |
+          go install "github.com/kyverno/chainsaw@${CHAINSAW_VERSION}"
+          chainsaw version
+
+      - name: Create k3d cluster
+        run: make k3d-cluster-up
+
+      - name: Bootstrap cluster (OpenEverest core + provider)
+        run: tilt ci -f dev/Tiltfile
+
+      - name: Run e2e tests
+        run: make test-e2e
+
+      - name: Dump diagnostics
+        if: failure()
+        run: |
+          kubectl get instances,inferenceservices,llminferenceservices -A -o wide || true
+          kubectl get pods -A -o wide || true
+          kubectl get events -A --sort-by='.lastTimestamp' || true
+          kubectl logs -l app.kubernetes.io/name=provider-kserve --tail=200 --all-containers || true
+          kubectl logs deployment/kserve-controller-manager -n default --tail=200 || true
+          kubectl logs deployment/llmisvc-controller-manager -n default --tail=200 || true
+
+      - name: Cleanup
+        if: always()
+        run: make k3d-cluster-down
