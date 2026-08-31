@@ -1,0 +1,17 @@
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: smoke
+spec:
+  description: |
+    Bootstrap smoke check: the provider and KServe controllers are Available and
+    the KServe CRDs exist. Fails loudly when the cluster is not in the state
+    the rest of the e2e suite will assume. No model serving.
+  steps:
+    - name: assert-bootstrap
+      try:
+        - assert:
+            file: 00-assert-deployments.yaml
+        - assert:
+            file: 00-assert-crds.yaml

@@ -1,0 +1,28 @@
+# Bootstrap installs the provider chart and bundled KServe controllers into the
+# default namespace (see dev/Tiltfile PROVIDER_NAMESPACE).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: provider-kserve
+  namespace: default
+status:
+  (conditions[?type == 'Available']):
+    - status: "True"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kserve-controller-manager
+  namespace: default
+status:
+  (conditions[?type == 'Available']):
+    - status: "True"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmisvc-controller-manager
+  namespace: default
+status:
+  (conditions[?type == 'Available']):
+    - status: "True"
