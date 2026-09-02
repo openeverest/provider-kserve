@@ -82,6 +82,35 @@ spec:
             tensorParallelSize:
               format: int32
               type: integer
+            workerCount:
+              format: int32
+              type: integer
+            workerResources:
+              properties:
+                claims:
+                  items:
+                    properties:
+                      name:
+                        type: string
+                      request:
+                        type: string
+                    type: object
+                  type: array
+                limits:
+                  additionalProperties:
+                    properties:
+                      format:
+                        type: string
+                    type: object
+                  type: object
+                requests:
+                  additionalProperties:
+                    properties:
+                      format:
+                        type: string
+                    type: object
+                  type: object
+              type: object
           type: object
       type: vllm
     predictor:
@@ -129,11 +158,43 @@ spec:
             prefillMinReplicas:
               format: int32
               type: integer
+            prefillPipelineParallelSize:
+              format: int32
+              type: integer
             prefillReplicas:
               format: int32
               type: integer
             prefillScalingActuator:
               type: string
+            prefillWorkerCount:
+              format: int32
+              type: integer
+            prefillWorkerResources:
+              properties:
+                claims:
+                  items:
+                    properties:
+                      name:
+                        type: string
+                      request:
+                        type: string
+                    type: object
+                  type: array
+                limits:
+                  additionalProperties:
+                    properties:
+                      format:
+                        type: string
+                    type: object
+                  type: object
+                requests:
+                  additionalProperties:
+                    properties:
+                      format:
+                        type: string
+                    type: object
+                  type: object
+              type: object
             tokenLimitPerHour:
               format: int32
               type: integer
@@ -239,6 +300,18 @@ spec:
                     message: Prefill min replicas cannot exceed Prefill max replicas
                 max: 32
                 min: 1
+            prefillPipelineParallelSize:
+              fieldParams:
+                helperText: Prefill stages. Required when Prefill worker count is set (must equal count + 1).
+                label: Prefill pipeline parallel size
+              path: spec.topology.parameters.prefillPipelineParallelSize
+              uiType: number
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.topology.parameters.prefillPipelineParallelSize) || spec.topology.parameters.enablePrefill == "true"'
+                    message: Prefill pipeline parallel size requires Enable Prefill/Decode Disaggregation
+                max: 16
+                min: 1
             prefillReplicas:
               fieldParams:
                 defaultValue: 1
@@ -267,12 +340,49 @@ spec:
                     message: Prefill autoscaling actuator requires Enable Prefill/Decode Disaggregation
                   - celExpr: '!has(spec.topology.parameters.prefillScalingActuator) || has(spec.topology.parameters.prefillMaxReplicas) || has(spec.topology.parameters.prefillMinReplicas)'
                     message: Prefill autoscaling actuator requires Prefill min or max replicas
+            prefillWorkerCount:
+              fieldParams:
+                helperText: Extra prefill nodes besides the prefill head. Turns on spec.prefill.worker.
+                label: Prefill worker count
+              path: spec.topology.parameters.prefillWorkerCount
+              uiType: number
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.topology.parameters.prefillWorkerCount) || spec.topology.parameters.enablePrefill == "true"'
+                    message: Prefill worker count requires Enable Prefill/Decode Disaggregation
+                  - celExpr: '!has(spec.topology.parameters.prefillWorkerCount) || (has(spec.topology.parameters.prefillPipelineParallelSize) && spec.topology.parameters.prefillPipelineParallelSize == spec.topology.parameters.prefillWorkerCount + 1)'
+                    message: Prefill pipeline parallel size must equal Prefill worker count + 1
+                max: 16
+                min: 1
+            prefillWorkerResources:
+              components:
+                cpu:
+                  fieldParams:
+                    label: Prefill worker CPU
+                  path: spec.topology.parameters.prefillWorkerResources.limits.cpu
+                  uiType: number
+                memory:
+                  fieldParams:
+                    badge: Gi
+                    badgeToApi: true
+                    label: Prefill worker Memory
+                  path: spec.topology.parameters.prefillWorkerResources.limits.memory
+                  uiType: number
+              groupType: line
+              uiType: group
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.topology.parameters.prefillWorkerResources) || has(spec.topology.parameters.prefillWorkerCount)'
+                    message: Prefill worker resources require Prefill worker count
           componentsOrder:
             - enablePrefill
             - prefillReplicas
             - prefillMinReplicas
             - prefillMaxReplicas
             - prefillScalingActuator
+            - prefillPipelineParallelSize
+            - prefillWorkerCount
+            - prefillWorkerResources
           description: Split prefill and decode into independently scaled deployments (llm-d pattern).
           label: Disaggregated Serving
         lora:
@@ -528,6 +638,7 @@ spec:
             pipelineParallelSize:
               fieldParams:
                 defaultValue: 1
+                helperText: Stages in one sharded model. When Worker count is set this must equal Worker count + 1 (head plus workers).
                 label: Pipeline Parallel Size
               path: spec.components.llmEngine.parameters.pipelineParallelSize
               uiType: number
@@ -569,6 +680,39 @@ spec:
               validation:
                 max: 16
                 min: 1
+            workerCount:
+              fieldParams:
+                helperText: Extra decode nodes besides the head (one sharded model). Turns on KServe spec.worker. Must equal Pipeline parallel size − 1. Replicas/min/max still count whole head+worker rings.
+                label: Worker count
+              path: spec.components.llmEngine.parameters.workerCount
+              uiType: number
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.components.llmEngine.parameters.workerCount) || (has(spec.components.llmEngine.parameters.pipelineParallelSize) && spec.components.llmEngine.parameters.pipelineParallelSize == spec.components.llmEngine.parameters.workerCount + 1)'
+                    message: Pipeline parallel size must equal Worker count + 1
+                max: 16
+                min: 1
+            workerResources:
+              components:
+                cpu:
+                  fieldParams:
+                    helperText: Optional. Empty copies the head resources.
+                    label: Worker CPU
+                  path: spec.components.llmEngine.parameters.workerResources.limits.cpu
+                  uiType: number
+                memory:
+                  fieldParams:
+                    badge: Gi
+                    badgeToApi: true
+                    label: Worker Memory
+                  path: spec.components.llmEngine.parameters.workerResources.limits.memory
+                  uiType: number
+              groupType: line
+              uiType: group
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.components.llmEngine.parameters.workerResources) || has(spec.components.llmEngine.parameters.workerCount)'
+                    message: Worker resources require Worker count
           description: Fixed replica count, or WVA autoscaling (KV-cache / queue-depth) via min/max. Autoscaling ignores Replicas. KServe minReplicas is ≥ 1 (no scale-to-zero).
           label: Scaling & Parallelism
       sectionsOrder:

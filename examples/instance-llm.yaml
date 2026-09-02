@@ -41,6 +41,9 @@ spec:
       # prefillMinReplicas: 1
       # prefillMaxReplicas: 4
       # prefillScalingActuator: keda
+      # Prefill multi-node. prefillPipelineParallelSize must equal count + 1.
+      # prefillWorkerCount: 1
+      # prefillPipelineParallelSize: 2
 
   components:
     # vLLM inference engine (required).
@@ -74,9 +77,14 @@ spec:
         # minReplicas: 1
         # maxReplicas: 4
         # scalingActuator: keda
-        # Split the model across GPUs on a node.
+        # Split the model across GPUs on a node. If nvidia.com/gpu is set,
+        # that count must be >= tensorParallelSize.
         tensorParallelSize: 1
         # pipelineParallelSize: 1
+        # Multi-node (one sharded model). Turns on spec.worker.
+        # pipelineParallelSize must equal workerCount + 1.
+        # workerCount: 1
+        # pipelineParallelSize: 2
         # Data parallelism (replica layout); common for Mixture-of-Experts
         # models. Mutually exclusive with pipelineParallelSize.
         # dataParallelSize: 2
