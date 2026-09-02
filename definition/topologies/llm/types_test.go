@@ -91,3 +91,20 @@ func TestUnmarshalPrefillScaling(t *testing.T) {
 		t.Fatalf("prefillScalingActuator=%q", got.PrefillScalingActuator)
 	}
 }
+
+func TestUnmarshalPrefillWorkers(t *testing.T) {
+	t.Parallel()
+	var got LlmTopologyParameters
+	if err := json.Unmarshal([]byte(`{"prefillWorkerCount":1,"prefillPipelineParallelSize":2,"prefillWorkerResources":{"limits":{"cpu":"4"}}}`), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.PrefillWorkerCount == nil || *got.PrefillWorkerCount != 1 {
+		t.Fatalf("prefillWorkerCount=%v", got.PrefillWorkerCount)
+	}
+	if got.PrefillPipelineParallelSize == nil || *got.PrefillPipelineParallelSize != 2 {
+		t.Fatalf("prefillPipelineParallelSize=%v", got.PrefillPipelineParallelSize)
+	}
+	if got.PrefillWorkerResources == nil {
+		t.Fatal("prefillWorkerResources unset")
+	}
+}

@@ -8,6 +8,8 @@
 // +k8s:openapi-gen=true
 package components
 
+import corev1 "k8s.io/api/core/v1"
+
 // LoRAAdapterSpec identifies one LoRA fine-tune served alongside the base model.
 // Each adapter is addressable by name in OpenAI "model" requests once KServe
 // configures vLLM (--lora-modules).
@@ -127,6 +129,16 @@ type VllmCustomSpec struct {
 	// ScalingActuator selects the WVA actuator backend: "keda" (default) or "hpa".
 	// KEDA queries Prometheus directly; HPA needs a Prometheus Adapter.
 	ScalingActuator string `json:"scalingActuator,omitempty"`
+
+	// WorkerCount is the number of extra worker pods besides the head for a
+	// pipeline-parallel multi-node model. Presence turns on
+	// LLMInferenceService.spec.worker. Must equal pipelineParallelSize - 1.
+	// PipelineParallelSize alone does not create workers.
+	WorkerCount *int32 `json:"workerCount,omitempty"`
+
+	// WorkerResources are optional CPU/memory/GPU requests for worker pods.
+	// Unset copies llmEngine.resources. Setting this without WorkerCount is an error.
+	WorkerResources *corev1.ResourceRequirements `json:"workerResources,omitempty"`
 }
 
 const (

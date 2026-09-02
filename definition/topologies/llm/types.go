@@ -72,6 +72,19 @@ type LlmTopologyParameters struct {
 	// same actuator on both sides.
 	PrefillScalingActuator string `json:"prefillScalingActuator,omitempty"`
 
+	// PrefillPipelineParallelSize is vLLM pipeline parallelism for the prefill
+	// workload. Required when PrefillWorkerCount is set (must equal
+	// PrefillWorkerCount + 1). Alone it is a flag only — no prefill workers.
+	PrefillPipelineParallelSize *int32 `json:"prefillPipelineParallelSize,omitempty"`
+
+	// PrefillWorkerCount is extra prefill worker pods besides the prefill head.
+	// Presence turns on spec.prefill.worker. Requires EnablePrefill.
+	PrefillWorkerCount *int32 `json:"prefillWorkerCount,omitempty"`
+
+	// PrefillWorkerResources are optional resources for prefill worker pods.
+	// Unset copies llmEngine.resources. Requires PrefillWorkerCount.
+	PrefillWorkerResources *corev1.ResourceRequirements `json:"prefillWorkerResources,omitempty"`
+
 	// EnableMetrics emits a Prometheus Operator PodMonitor for this instance's
 	// vLLM pods (/metrics). Nil/unset defaults to true for backward compatibility.
 	EnableMetrics *bool `json:"enableMetrics,omitempty"`
@@ -169,6 +182,27 @@ func (t *LlmTopologyParameters) UnmarshalJSON(data []byte) error {
 		if err := json.Unmarshal(v, &t.PrefillScalingActuator); err != nil {
 			return fmt.Errorf("prefillScalingActuator: %w", err)
 		}
+	}
+	if v, ok := raw["prefillPipelineParallelSize"]; ok && string(v) != "null" {
+		var n int32
+		if err := json.Unmarshal(v, &n); err != nil {
+			return fmt.Errorf("prefillPipelineParallelSize: %w", err)
+		}
+		t.PrefillPipelineParallelSize = &n
+	}
+	if v, ok := raw["prefillWorkerCount"]; ok && string(v) != "null" {
+		var n int32
+		if err := json.Unmarshal(v, &n); err != nil {
+			return fmt.Errorf("prefillWorkerCount: %w", err)
+		}
+		t.PrefillWorkerCount = &n
+	}
+	if v, ok := raw["prefillWorkerResources"]; ok && string(v) != "null" {
+		var res corev1.ResourceRequirements
+		if err := json.Unmarshal(v, &res); err != nil {
+			return fmt.Errorf("prefillWorkerResources: %w", err)
+		}
+		t.PrefillWorkerResources = &res
 	}
 	if v, ok := raw["tracingEndpoint"]; ok && string(v) != "null" {
 		if err := json.Unmarshal(v, &t.TracingEndpoint); err != nil {

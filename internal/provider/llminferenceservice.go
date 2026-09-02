@@ -52,6 +52,8 @@ const (
 	// vllmServingPort is the port the vLLM OpenAI-compatible API listens on and
 	// the port KServe's workload Service targets.
 	vllmServingPort = 8000
+
+	nvidiaGPUResource = corev1.ResourceName("nvidia.com/gpu")
 )
 
 // workloadPodSelector returns the label selector KServe stamps on an
@@ -147,6 +149,44 @@ func validateLLM(c *controller.Context) error {
 	if decode.enabled() && prefill.enabled() && resolvedActuator(decode.actuator) != resolvedActuator(prefill.actuator) {
 		return fmt.Errorf("decode and prefill must use the same scalingActuator (KServe WVA)")
 	}
+	if err := validateWorkerGroup(
+		params.WorkerCount,
+		params.PipelineParallelSize,
+		params.WorkerResources != nil,
+		common.ComponentLlmEngine+".parameters.workerCount",
+		common.ComponentLlmEngine+".parameters.pipelineParallelSize",
+		common.ComponentLlmEngine+".parameters.workerResources",
+	); err != nil {
+		return err
+	}
+	cpuProfile := strings.EqualFold(params.ComputeProfile, computeProfileCPU)
+	if err := validateTensorGPU(comp.Resources, params.TensorParallelSize, cpuProfile, common.ComponentLlmEngine+".resources"); err != nil {
+		return err
+	}
+	if params.WorkerCount != nil {
+		if err := validateTensorGPU(overlayResources(comp.Resources, params.WorkerResources), params.TensorParallelSize, cpuProfile, common.ComponentLlmEngine+".parameters.workerResources"); err != nil {
+			return err
+		}
+	}
+	prefillWorkers := topo.PrefillWorkerCount != nil || topo.PrefillWorkerResources != nil
+	if prefillWorkers && !topo.EnablePrefill {
+		return fmt.Errorf("prefill worker fields require enablePrefill")
+	}
+	if err := validateWorkerGroup(
+		topo.PrefillWorkerCount,
+		topo.PrefillPipelineParallelSize,
+		topo.PrefillWorkerResources != nil,
+		"topology.parameters.prefillWorkerCount",
+		"topology.parameters.prefillPipelineParallelSize",
+		"topology.parameters.prefillWorkerResources",
+	); err != nil {
+		return err
+	}
+	if topo.PrefillWorkerCount != nil {
+		if err := validateTensorGPU(overlayResources(comp.Resources, topo.PrefillWorkerResources), params.TensorParallelSize, cpuProfile, "topology.parameters.prefillWorkerResources"); err != nil {
+			return err
+		}
+	}
 	return validateLoRAParams(c.Name(), params)
 }
 
@@ -200,6 +240,78 @@ func validateWorkloadScaling(s workloadScaling, minField, maxField, actuatorFiel
 		return fmt.Errorf("%s must be %s or %s", actuatorField, components.ScalingActuatorHPA, components.ScalingActuatorKEDA)
 	}
 	return nil
+}
+
+func validateWorkerGroup(count, pipeline *int32, resourcesSet bool, countField, pipelineField, resourcesField string) error {
+	if count == nil {
+		if resourcesSet {
+			return fmt.Errorf("%s requires %s", resourcesField, countField)
+		}
+		return nil
+	}
+	if *count < 1 {
+		return fmt.Errorf("%s must be at least 1", countField)
+	}
+	if pipeline == nil {
+		return fmt.Errorf("%s is required when %s is set", pipelineField, countField)
+	}
+	if *pipeline != *count+1 {
+		return fmt.Errorf("%s must equal %s + 1 (got %d, want %d)", pipelineField, countField, *pipeline, *count+1)
+	}
+	return nil
+}
+
+func validateTensorGPU(res *corev1.ResourceRequirements, tp *int32, cpuProfile bool, path string) error {
+	if cpuProfile || tp == nil || *tp < 1 || res == nil {
+		return nil
+	}
+	q, ok := res.Limits[nvidiaGPUResource]
+	if !ok {
+		q, ok = res.Requests[nvidiaGPUResource]
+	}
+	if !ok {
+		return nil
+	}
+	if q.Value() < int64(*tp) {
+		return fmt.Errorf("%s nvidia.com/gpu (%d) must be >= tensorParallelSize (%d)", path, q.Value(), *tp)
+	}
+	return nil
+}
+
+// overlayResources copies head, then applies overlay keys (UI may set only CPU/memory).
+func overlayResources(head, overlay *corev1.ResourceRequirements) *corev1.ResourceRequirements {
+	if overlay == nil {
+		return head
+	}
+	if head == nil {
+		return overlay
+	}
+	out := head.DeepCopy()
+	if len(overlay.Limits) > 0 {
+		if out.Limits == nil {
+			out.Limits = corev1.ResourceList{}
+		}
+		for k, v := range overlay.Limits {
+			out.Limits[k] = v
+		}
+	}
+	if len(overlay.Requests) > 0 {
+		if out.Requests == nil {
+			out.Requests = corev1.ResourceList{}
+		}
+		for k, v := range overlay.Requests {
+			out.Requests[k] = v
+		}
+	}
+	return out
+}
+
+func buildWorkerPodSpec(res *corev1.ResourceRequirements) *corev1.PodSpec {
+	c := corev1.Container{Name: "main"}
+	if res != nil {
+		c.Resources = *res
+	}
+	return &corev1.PodSpec{Containers: []corev1.Container{c}}
 }
 
 func buildScalingSpec(s workloadScaling) *kservev1alpha2.ScalingSpec {
@@ -488,6 +600,10 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		spec.Parallelism = p
 	}
 
+	if params.WorkerCount != nil {
+		spec.Worker = buildWorkerPodSpec(overlayResources(comp.Resources, params.WorkerResources))
+	}
+
 	// Optional pod resource requirements from the component spec. KServe
 	// strategic-merges the Instance spec last, so a "main" container override
 	// here wins over the preset and any baseRefs.
@@ -560,6 +676,23 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 			prefill.Scaling = buildScalingSpec(scale)
 		} else if topo.PrefillReplicas != nil {
 			prefill.Replicas = topo.PrefillReplicas
+		}
+		if topo.PrefillPipelineParallelSize != nil {
+			prefill.Parallelism = &kservev1alpha2.ParallelismSpec{
+				Pipeline: topo.PrefillPipelineParallelSize,
+			}
+		}
+		if comp.Resources != nil {
+			res := *comp.Resources
+			if isCPUProfile {
+				res = mirrorLimitsToRequests(res)
+			}
+			prefill.Template = &corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "main", Resources: res}},
+			}
+		}
+		if topo.PrefillWorkerCount != nil {
+			prefill.Worker = buildWorkerPodSpec(overlayResources(comp.Resources, topo.PrefillWorkerResources))
 		}
 		spec.Prefill = prefill
 	}

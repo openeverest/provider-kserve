@@ -62,7 +62,7 @@ provider itself is covered under [Installation](#installation).
 | Capability | Status | Notes |
 |---|---|---|
 | Provisioning | ✅ | |
-| Horizontal scaling | ✅ | `predictor`: `minReplicas` / `maxReplicas` (`0` enables scale-to-zero). `llm`: static `replicas`, or WVA `minReplicas` / `maxReplicas` + `scalingActuator` (`hpa` \| `keda`) on decode and prefill. LLM min is ≥ 1 (no scale-to-zero). |
+| Horizontal scaling | ✅ | `predictor`: `minReplicas` / `maxReplicas` (`0` enables scale-to-zero). `llm`: static `replicas`, or WVA `minReplicas` / `maxReplicas` + `scalingActuator` (`hpa` \| `keda`) on decode and prefill. LLM min is ≥ 1 (no scale-to-zero). With `workerCount`, one replica is a full head+worker ring. |
 | Vertical scaling (CPU / memory) | ✅ | `spec.components.<name>.resources`; limits are mirrored into requests (Guaranteed QoS) |
 | Version upgrades | ✅ | of the deployed serving runtime version — change `spec.version`; see [Versions](#versions) |
 | Custom configuration | ✅ | structured parameters, plus an inline `LLMInferenceServiceConfig` escape hatch |
@@ -179,6 +179,8 @@ kubectl get instance llama-31-8b -o jsonpath='{.status.connection}'
 
 There is no default: an `Instance` without `spec.topology.type` is rejected.
 
+For models that do not fit on one node, see [Serve a model that does not fit on one node](docs/llm-multi-node.md).
+
 ## Versions
 
 <!-- BEGIN GENERATED: versions -->
@@ -207,8 +209,10 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 |---|---|---|
 | `modelURI` | string | Model artifacts location (`hf://`, `s3://`, `gs://`, `pvc://`). **Required.** |
 | `modelName` | string | Name advertised in the request `model` field. Defaults to the Instance name. |
-| `tensorParallelSize` | int32 | vLLM tensor parallelism (`--tensor-parallel-size`). |
-| `pipelineParallelSize` | int32 | vLLM pipeline parallelism (`--pipeline-parallel-size`). |
+| `tensorParallelSize` | int32 | vLLM tensor parallelism (`--tensor-parallel-size`). When `nvidia.com/gpu` is set on the head (or workers), the GPU count must be ≥ this value. Skipped on CPU / no GPU key. |
+| `pipelineParallelSize` | int32 | vLLM pipeline parallelism (`--pipeline-parallel-size`). When `workerCount` is set this must equal `workerCount + 1`. Alone it does not create worker pods. |
+| `workerCount` | int32 | Extra decode worker pods besides the head (one sharded model). Turns on `LLMInferenceService.spec.worker`. Requires matching `pipelineParallelSize`. See [Serve a model that does not fit on one node](docs/llm-multi-node.md). |
+| `workerResources` | ResourceRequirements | Optional worker CPU/memory/GPU. Unset copies `llmEngine.resources`. Requires `workerCount`. |
 | `dataParallelSize` | int32 | vLLM data parallelism (`ParallelismSpec.data`); common for Mixture-of-Experts replica layouts. Mutually exclusive with `pipelineParallelSize`; the provider mirrors it into `dataLocal` for a single-node layout. |
 | `expertParallel` | string | `enabled` / `disabled` (default) expert parallelism (`ParallelismSpec.expert`) for MoE models (Mixtral, DeepSeek, Qwen-MoE). |
 | `computeProfile` | string | `gpu` (default) uses the bundled CUDA presets; `cpu` composes the CPU-only `kserve-config-llm-cpu` config via `baseRefs`. See [Compute profile](#compute-profile-cpu-serving). |
@@ -244,6 +248,9 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 | `prefillMinReplicas` | int32 | Prefill WVA floor (≥ 1). Enables `spec.prefill.scaling`. Requires `enablePrefill`. |
 | `prefillMaxReplicas` | int32 | Prefill WVA ceiling. Required when prefill autoscaling is enabled. |
 | `prefillScalingActuator` | string | Prefill WVA actuator: `keda` (default) or `hpa`. Must match decode when both sides autoscale. |
+| `prefillPipelineParallelSize` | int32 | Prefill pipeline parallelism. Required when `prefillWorkerCount` is set (`count + 1`). |
+| `prefillWorkerCount` | int32 | Extra prefill worker pods besides the prefill head. Requires `enablePrefill`. |
+| `prefillWorkerResources` | ResourceRequirements | Optional prefill worker resources. Unset copies `llmEngine.resources`. Requires `prefillWorkerCount`. |
 | `enableMetrics` | bool | Emit a vLLM PodMonitor for this instance (`/metrics`). Defaults to enabled. |
 | `enableTracing` | bool | Enable KServe distributed tracing (OTLP) across gateway/scheduler/model. Disabled by default. |
 | `tracingEndpoint` | string | Optional OTLP exporter endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`); used only when `enableTracing` is true. |
@@ -693,7 +700,7 @@ and code generation are documented once for all providers in
 | `definition/` | Provider identity, component types, versions, topologies |
 | `charts/provider-kserve/` | Helm chart (`generated/` and `files/` are produced by `make generate`) |
 | `config/rbac/role.yaml` | Generated `ClusterRole` — do not edit |
-| `docs/` | Deployment, TLS and observability guides, Grafana dashboards |
+| `docs/` | Deployment, TLS, observability, and [multi-node LLM](docs/llm-multi-node.md) guides; Grafana dashboards |
 | `test/reconcile/` | Fast chainsaw suites (`llm`, `predictor`): the CR the provider derives, and its garbage collection |
 | `test/e2e/` | Slow chainsaw suites: a real model served end to end. Manually gated, not run per PR |
 | `test/vars.sh` | Pinned KServe and workload versions used by tests |
