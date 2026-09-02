@@ -62,7 +62,7 @@ provider itself is covered under [Installation](#installation).
 | Capability | Status | Notes |
 |---|---|---|
 | Provisioning | ✅ | |
-| Horizontal scaling | ✅ | `replicas`, or `minReplicas` / `maxReplicas` on the `predictor` component (`0` enables scale-to-zero) |
+| Horizontal scaling | ✅ | `predictor`: `minReplicas` / `maxReplicas` (`0` enables scale-to-zero). `llm`: static `replicas`, or WVA `minReplicas` / `maxReplicas` + `scalingActuator` (`hpa` \| `keda`) on decode and prefill. LLM min is ≥ 1 (no scale-to-zero). |
 | Vertical scaling (CPU / memory) | ✅ | `spec.components.<name>.resources`; limits are mirrored into requests (Guaranteed QoS) |
 | Version upgrades | ✅ | of the deployed serving runtime version — change `spec.version`; see [Versions](#versions) |
 | Custom configuration | ✅ | structured parameters, plus an inline `LLMInferenceServiceConfig` escape hatch |
@@ -216,6 +216,9 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 | `baseRefs` | []string | `LLMInferenceServiceConfig` names to inherit/merge. |
 | `config` | string | Inline `LLMInferenceServiceConfig` spec body. See [Advanced customization](#advanced-customization-inline-config). |
 | `disableStorageInitializer` | bool | Skip the storage-initializer init container. |
+| `minReplicas` | int32 | Decode WVA autoscaling floor (≥ 1). Setting `minReplicas` or `maxReplicas` enables `LLMInferenceService.spec.scaling` and ignores `llmEngine.replicas`. |
+| `maxReplicas` | int32 | Decode WVA autoscaling ceiling. Required when decode autoscaling is enabled. |
+| `scalingActuator` | string | WVA actuator: `keda` (default) or `hpa`. KEDA queries Prometheus directly; HPA needs a Prometheus Adapter. |
 
 ### `predictor` (modelServer) parameters
 
@@ -237,7 +240,10 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 | `enableAIGateway` | bool | Legacy alias for `externalAccess: EnvoyAIGateway` when `externalAccess` is unset. |
 | `tokenLimitPerHour` | int32 | Per-user, per-model hourly token quota. Only valid with Envoy AI Gateway. Defaults to 1000 when a Redis/Valkey rate-limit backend is configured. |
 | `enablePrefill` | bool | Enable disaggregated serving with a separate prefill workload. |
-| `prefillReplicas` | int32 | Replicas for the prefill workload (when `enablePrefill` is true). |
+| `prefillReplicas` | int32 | Static replicas for the prefill workload (when `enablePrefill` is true). Ignored when prefill min/max are set. |
+| `prefillMinReplicas` | int32 | Prefill WVA floor (≥ 1). Enables `spec.prefill.scaling`. Requires `enablePrefill`. |
+| `prefillMaxReplicas` | int32 | Prefill WVA ceiling. Required when prefill autoscaling is enabled. |
+| `prefillScalingActuator` | string | Prefill WVA actuator: `keda` (default) or `hpa`. Must match decode when both sides autoscale. |
 | `enableMetrics` | bool | Emit a vLLM PodMonitor for this instance (`/metrics`). Defaults to enabled. |
 | `enableTracing` | bool | Enable KServe distributed tracing (OTLP) across gateway/scheduler/model. Disabled by default. |
 | `tracingEndpoint` | string | Optional OTLP exporter endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`); used only when `enableTracing` is true. |

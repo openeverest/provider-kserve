@@ -1,11 +1,19 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
 
+	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
+	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
+
 	"github.com/openeverest/provider-kserve/definition/components"
+	"github.com/openeverest/provider-kserve/definition/topologies/llm"
 	"github.com/openeverest/provider-kserve/internal/common"
 )
 
@@ -185,6 +193,179 @@ func TestValidateLoRAParams(t *testing.T) {
 			LoraSlot1:      "sql-lora",
 		}); err != nil {
 			t.Fatal(err)
+		}
+	})
+}
+
+func rawJSON(t *testing.T, v any) *runtime.RawExtension {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &runtime.RawExtension{Raw: b}
+}
+
+func llmContext(t *testing.T, replicas *int32, params components.VllmCustomSpec, topo llm.LlmTopologyParameters) *controller.Context {
+	t.Helper()
+	if params.ModelURI == "" {
+		params.ModelURI = "hf://org/model"
+	}
+	inst := &corev1alpha1.Instance{
+		ObjectMeta: metav1.ObjectMeta{Name: "llama", Namespace: "ns"},
+		Spec: corev1alpha1.InstanceSpec{
+			Topology: &corev1alpha1.TopologySpec{
+				Type:       common.TopologyLLM,
+				Parameters: rawJSON(t, topo),
+			},
+			Components: map[string]corev1alpha1.ComponentSpec{
+				common.ComponentLlmEngine: {
+					Type:       common.ComponentTypeVllm,
+					Replicas:   replicas,
+					Parameters: rawJSON(t, params),
+				},
+			},
+		},
+	}
+	return controller.NewContext(context.Background(), nil, inst, common.ProviderName)
+}
+
+func TestValidateWorkloadScaling(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		s       workloadScaling
+		wantErr bool
+	}{
+		{name: "unset", s: workloadScaling{}},
+		{name: "max only", s: workloadScaling{max: ptr.To(int32(4))}},
+		{name: "min and max", s: workloadScaling{min: ptr.To(int32(1)), max: ptr.To(int32(4))}},
+		{name: "missing max", s: workloadScaling{min: ptr.To(int32(1))}, wantErr: true},
+		{name: "min zero", s: workloadScaling{min: ptr.To(int32(0)), max: ptr.To(int32(4))}, wantErr: true},
+		{name: "min exceeds max", s: workloadScaling{min: ptr.To(int32(8)), max: ptr.To(int32(4))}, wantErr: true},
+		{name: "bad actuator", s: workloadScaling{max: ptr.To(int32(4)), actuator: "knative"}, wantErr: true},
+		{name: "hpa", s: workloadScaling{max: ptr.To(int32(4)), actuator: components.ScalingActuatorHPA}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateWorkloadScaling(tc.s, "minReplicas", "maxReplicas", "scalingActuator")
+			if tc.wantErr != (err != nil) {
+				t.Fatalf("validateWorkloadScaling() error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestBuildScalingSpec(t *testing.T) {
+	t.Parallel()
+
+	if got := buildScalingSpec(workloadScaling{}); got != nil {
+		t.Fatalf("unset = %#v, want nil", got)
+	}
+
+	keda := buildScalingSpec(workloadScaling{min: ptr.To(int32(1)), max: ptr.To(int32(4))})
+	if keda == nil || keda.MaxReplicas != 4 || keda.MinReplicas == nil || *keda.MinReplicas != 1 {
+		t.Fatalf("keda bounds = %#v", keda)
+	}
+	if keda.WVA == nil || keda.WVA.KEDA == nil || keda.WVA.HPA != nil {
+		t.Fatalf("default actuator should be keda: %#v", keda.WVA)
+	}
+
+	hpa := buildScalingSpec(workloadScaling{max: ptr.To(int32(2)), actuator: "HPA"})
+	if hpa == nil || hpa.WVA == nil || hpa.WVA.HPA == nil || hpa.WVA.KEDA != nil {
+		t.Fatalf("hpa actuator = %#v", hpa)
+	}
+}
+
+func TestBuildLLMInferenceServiceScaling(t *testing.T) {
+	t.Parallel()
+
+	t.Run("static replicas", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, ptr.To(int32(2)), components.VllmCustomSpec{}, llm.LlmTopologyParameters{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Spec.Replicas == nil || *got.Spec.Replicas != 2 {
+			t.Fatalf("replicas = %v, want 2", got.Spec.Replicas)
+		}
+		if got.Spec.Scaling != nil {
+			t.Fatalf("scaling = %#v, want nil", got.Spec.Scaling)
+		}
+	})
+
+	t.Run("scaling wins over replicas", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, ptr.To(int32(2)), components.VllmCustomSpec{
+			MaxReplicas: ptr.To(int32(8)),
+			MinReplicas: ptr.To(int32(1)),
+		}, llm.LlmTopologyParameters{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Spec.Replicas != nil {
+			t.Fatalf("replicas = %v, want nil when scaling is set", got.Spec.Replicas)
+		}
+		if got.Spec.Scaling == nil || got.Spec.Scaling.MaxReplicas != 8 || got.Spec.Scaling.WVA == nil || got.Spec.Scaling.WVA.KEDA == nil {
+			t.Fatalf("scaling = %#v", got.Spec.Scaling)
+		}
+	})
+
+	t.Run("prefill scaling", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{
+			EnablePrefill:      true,
+			PrefillReplicas:    ptr.To(int32(3)),
+			PrefillMaxReplicas: ptr.To(int32(6)),
+			PrefillMinReplicas: ptr.To(int32(2)),
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Spec.Prefill == nil || got.Spec.Prefill.Replicas != nil {
+			t.Fatalf("prefill replicas should be omitted: %#v", got.Spec.Prefill)
+		}
+		if got.Spec.Prefill.Scaling == nil || got.Spec.Prefill.Scaling.MaxReplicas != 6 {
+			t.Fatalf("prefill scaling = %#v", got.Spec.Prefill.Scaling)
+		}
+	})
+}
+
+func TestValidateLLMScaling(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid decode scaling", func(t *testing.T) {
+		t.Parallel()
+		if err := validateLLM(llmContext(t, ptr.To(int32(1)), components.VllmCustomSpec{
+			MaxReplicas: ptr.To(int32(4)),
+		}, llm.LlmTopologyParameters{})); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("prefill scaling without enablePrefill", func(t *testing.T) {
+		t.Parallel()
+		err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{
+			PrefillMaxReplicas: ptr.To(int32(4)),
+		}))
+		if err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("actuator mismatch", func(t *testing.T) {
+		t.Parallel()
+		err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{
+			MaxReplicas:     ptr.To(int32(4)),
+			ScalingActuator: components.ScalingActuatorHPA,
+		}, llm.LlmTopologyParameters{
+			EnablePrefill:          true,
+			PrefillMaxReplicas:     ptr.To(int32(4)),
+			PrefillScalingActuator: components.ScalingActuatorKEDA,
+		}))
+		if err == nil {
+			t.Fatal("expected actuator mismatch error")
 		}
 	})
 }

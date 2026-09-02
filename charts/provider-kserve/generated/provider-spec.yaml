@@ -64,6 +64,12 @@ spec:
               type: string
             loraSlot3:
               type: string
+            maxReplicas:
+              format: int32
+              type: integer
+            minReplicas:
+              format: int32
+              type: integer
             modelName:
               type: string
             modelURI:
@@ -71,6 +77,8 @@ spec:
             pipelineParallelSize:
               format: int32
               type: integer
+            scalingActuator:
+              type: string
             tensorParallelSize:
               format: int32
               type: integer
@@ -115,9 +123,17 @@ spec:
               type: boolean
             externalAccess:
               type: string
+            prefillMaxReplicas:
+              format: int32
+              type: integer
+            prefillMinReplicas:
+              format: int32
+              type: integer
             prefillReplicas:
               format: int32
               type: integer
+            prefillScalingActuator:
+              type: string
             tokenLimitPerHour:
               format: int32
               type: integer
@@ -197,18 +213,66 @@ spec:
                     value: "true"
               path: spec.topology.parameters.enablePrefill
               uiType: select
+            prefillMaxReplicas:
+              fieldParams:
+                helperText: Prefill WVA ceiling. Required to enable prefill autoscaling.
+                label: Prefill max replicas
+              path: spec.topology.parameters.prefillMaxReplicas
+              uiType: number
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.topology.parameters.prefillMaxReplicas) || spec.topology.parameters.enablePrefill == "true"'
+                    message: Prefill max replicas requires Enable Prefill/Decode Disaggregation
+                max: 32
+                min: 1
+            prefillMinReplicas:
+              fieldParams:
+                helperText: Prefill WVA floor. Enables prefill autoscaling; must be ≥ 1.
+                label: Prefill min replicas
+              path: spec.topology.parameters.prefillMinReplicas
+              uiType: number
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.topology.parameters.prefillMinReplicas) || spec.topology.parameters.enablePrefill == "true"'
+                    message: Prefill min replicas requires Enable Prefill/Decode Disaggregation
+                  - celExpr: '!has(spec.topology.parameters.prefillMinReplicas) || !has(spec.topology.parameters.prefillMaxReplicas) || spec.topology.parameters.prefillMinReplicas <= spec.topology.parameters.prefillMaxReplicas'
+                    message: Prefill min replicas cannot exceed Prefill max replicas
+                max: 32
+                min: 1
             prefillReplicas:
               fieldParams:
                 defaultValue: 1
+                helperText: Fixed prefill replica count. Ignored when Prefill min/max replicas are set.
                 label: Prefill Replicas
               path: spec.topology.parameters.prefillReplicas
               uiType: number
               validation:
                 max: 32
                 min: 0
+            prefillScalingActuator:
+              fieldParams:
+                displayEmpty: true
+                helperText: Must match decode actuator when both sides autoscale. KEDA (default) or HPA.
+                label: Prefill autoscaling actuator
+                options:
+                  - label: KEDA
+                    value: keda
+                  - label: HPA
+                    value: hpa
+              path: spec.topology.parameters.prefillScalingActuator
+              uiType: select
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.topology.parameters.prefillScalingActuator) || spec.topology.parameters.enablePrefill == "true"'
+                    message: Prefill autoscaling actuator requires Enable Prefill/Decode Disaggregation
+                  - celExpr: '!has(spec.topology.parameters.prefillScalingActuator) || has(spec.topology.parameters.prefillMaxReplicas) || has(spec.topology.parameters.prefillMinReplicas)'
+                    message: Prefill autoscaling actuator requires Prefill min or max replicas
           componentsOrder:
             - enablePrefill
             - prefillReplicas
+            - prefillMinReplicas
+            - prefillMaxReplicas
+            - prefillScalingActuator
           description: Split prefill and decode into independently scaled deployments (llm-d pattern).
           label: Disaggregated Serving
         lora:
@@ -440,6 +504,27 @@ spec:
                     value: enabled
               path: spec.components.llmEngine.parameters.expertParallel
               uiType: select
+            maxReplicas:
+              fieldParams:
+                helperText: Autoscaling ceiling. Required to enable WVA autoscaling on decode.
+                label: Max replicas
+              path: spec.components.llmEngine.parameters.maxReplicas
+              uiType: number
+              validation:
+                max: 32
+                min: 1
+            minReplicas:
+              fieldParams:
+                helperText: Autoscaling floor (KServe WVA). Enables autoscaling; must be ≥ 1.
+                label: Min replicas
+              path: spec.components.llmEngine.parameters.minReplicas
+              uiType: number
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.components.llmEngine.parameters.minReplicas) || !has(spec.components.llmEngine.parameters.maxReplicas) || spec.components.llmEngine.parameters.minReplicas <= spec.components.llmEngine.parameters.maxReplicas'
+                    message: Min replicas cannot exceed Max replicas
+                max: 32
+                min: 1
             pipelineParallelSize:
               fieldParams:
                 defaultValue: 1
@@ -452,12 +537,29 @@ spec:
             replicas:
               fieldParams:
                 defaultValue: 1
+                helperText: Fixed decode replica count. Ignored when Min/Max replicas are set.
                 label: Replicas
               path: spec.components.llmEngine.replicas
               uiType: number
               validation:
                 max: 32
                 min: 0
+            scalingActuator:
+              fieldParams:
+                displayEmpty: true
+                helperText: Used when Min/Max replicas are set. KEDA (default) queries Prometheus directly; HPA needs a Prometheus Adapter.
+                label: Autoscaling actuator
+                options:
+                  - label: KEDA
+                    value: keda
+                  - label: HPA
+                    value: hpa
+              path: spec.components.llmEngine.parameters.scalingActuator
+              uiType: select
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.components.llmEngine.parameters.scalingActuator) || has(spec.components.llmEngine.parameters.maxReplicas) || has(spec.components.llmEngine.parameters.minReplicas)'
+                    message: Autoscaling actuator requires Min or Max replicas
             tensorParallelSize:
               fieldParams:
                 defaultValue: 1
@@ -467,7 +569,7 @@ spec:
               validation:
                 max: 16
                 min: 1
-          description: Configure replicas and runtime parallelism.
+          description: Fixed replica count, or WVA autoscaling (KV-cache / queue-depth) via min/max. Autoscaling ignores Replicas. KServe minReplicas is ≥ 1 (no scale-to-zero).
           label: Scaling & Parallelism
       sectionsOrder:
         - basicInfo

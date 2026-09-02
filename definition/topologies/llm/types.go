@@ -16,10 +16,10 @@ import (
 
 // External access modes for the llm topology UI / parameters.
 const (
-	ExternalAccessClusterIP       = "ClusterIP"
-	ExternalAccessLoadBalancer    = "LoadBalancer"
-	ExternalAccessNodePort        = "NodePort"
-	ExternalAccessEnvoyAIGateway  = "EnvoyAIGateway"
+	ExternalAccessClusterIP      = "ClusterIP"
+	ExternalAccessLoadBalancer   = "LoadBalancer"
+	ExternalAccessNodePort       = "NodePort"
+	ExternalAccessEnvoyAIGateway = "EnvoyAIGateway"
 )
 
 // LlmTopologyParameters defines the topology-level parameters for the llm
@@ -53,8 +53,24 @@ type LlmTopologyParameters struct {
 	EnablePrefill bool `json:"enablePrefill,omitempty"`
 
 	// PrefillReplicas sets the number of replicas for the prefill workload.
-	// Only used when EnablePrefill is true.
+	// Only used when EnablePrefill is true. Ignored when prefill autoscaling
+	// (PrefillMinReplicas / PrefillMaxReplicas) is set.
 	PrefillReplicas *int32 `json:"prefillReplicas,omitempty"`
+
+	// PrefillMinReplicas is the WVA autoscaling floor for the prefill workload.
+	// Setting PrefillMinReplicas or PrefillMaxReplicas enables
+	// spec.prefill.scaling (mutually exclusive with PrefillReplicas).
+	// Requires EnablePrefill. KServe requires ≥ 1.
+	PrefillMinReplicas *int32 `json:"prefillMinReplicas,omitempty"`
+
+	// PrefillMaxReplicas is the WVA autoscaling ceiling for the prefill
+	// workload. Required when prefill autoscaling is enabled.
+	PrefillMaxReplicas *int32 `json:"prefillMaxReplicas,omitempty"`
+
+	// PrefillScalingActuator selects the prefill WVA actuator: "keda" (default)
+	// or "hpa". When both decode and prefill autoscale, KServe requires the
+	// same actuator on both sides.
+	PrefillScalingActuator string `json:"prefillScalingActuator,omitempty"`
 
 	// EnableMetrics emits a Prometheus Operator PodMonitor for this instance's
 	// vLLM pods (/metrics). Nil/unset defaults to true for backward compatibility.
@@ -134,6 +150,25 @@ func (t *LlmTopologyParameters) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("prefillReplicas: %w", err)
 		}
 		t.PrefillReplicas = &n
+	}
+	if v, ok := raw["prefillMinReplicas"]; ok && string(v) != "null" {
+		var n int32
+		if err := json.Unmarshal(v, &n); err != nil {
+			return fmt.Errorf("prefillMinReplicas: %w", err)
+		}
+		t.PrefillMinReplicas = &n
+	}
+	if v, ok := raw["prefillMaxReplicas"]; ok && string(v) != "null" {
+		var n int32
+		if err := json.Unmarshal(v, &n); err != nil {
+			return fmt.Errorf("prefillMaxReplicas: %w", err)
+		}
+		t.PrefillMaxReplicas = &n
+	}
+	if v, ok := raw["prefillScalingActuator"]; ok && string(v) != "null" {
+		if err := json.Unmarshal(v, &t.PrefillScalingActuator); err != nil {
+			return fmt.Errorf("prefillScalingActuator: %w", err)
+		}
 	}
 	if v, ok := raw["tracingEndpoint"]; ok && string(v) != "null" {
 		if err := json.Unmarshal(v, &t.TracingEndpoint); err != nil {

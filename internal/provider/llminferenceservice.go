@@ -123,7 +123,100 @@ func validateLLM(c *controller.Context) error {
 			return fmt.Errorf("tokenLimitPerHour must be greater than zero")
 		}
 	}
+	decode := decodeScaling(params)
+	if err := validateWorkloadScaling(
+		decode,
+		common.ComponentLlmEngine+".parameters.minReplicas",
+		common.ComponentLlmEngine+".parameters.maxReplicas",
+		common.ComponentLlmEngine+".parameters.scalingActuator",
+	); err != nil {
+		return err
+	}
+	prefill := prefillScaling(topo)
+	if prefill.enabled() && !topo.EnablePrefill {
+		return fmt.Errorf("prefill autoscaling requires enablePrefill")
+	}
+	if err := validateWorkloadScaling(
+		prefill,
+		"topology.parameters.prefillMinReplicas",
+		"topology.parameters.prefillMaxReplicas",
+		"topology.parameters.prefillScalingActuator",
+	); err != nil {
+		return err
+	}
+	if decode.enabled() && prefill.enabled() && resolvedActuator(decode.actuator) != resolvedActuator(prefill.actuator) {
+		return fmt.Errorf("decode and prefill must use the same scalingActuator (KServe WVA)")
+	}
 	return validateLoRAParams(c.Name(), params)
+}
+
+// workloadScaling is the min/max/actuator triple shared by decode and prefill.
+type workloadScaling struct {
+	min      *int32
+	max      *int32
+	actuator string
+}
+
+func (s workloadScaling) enabled() bool {
+	return s.min != nil || s.max != nil || s.actuator != ""
+}
+
+func decodeScaling(params components.VllmCustomSpec) workloadScaling {
+	return workloadScaling{min: params.MinReplicas, max: params.MaxReplicas, actuator: params.ScalingActuator}
+}
+
+func prefillScaling(topo llm.LlmTopologyParameters) workloadScaling {
+	return workloadScaling{min: topo.PrefillMinReplicas, max: topo.PrefillMaxReplicas, actuator: topo.PrefillScalingActuator}
+}
+
+func resolvedActuator(actuator string) string {
+	if strings.EqualFold(strings.TrimSpace(actuator), components.ScalingActuatorHPA) {
+		return components.ScalingActuatorHPA
+	}
+	return components.ScalingActuatorKEDA
+}
+
+func validateWorkloadScaling(s workloadScaling, minField, maxField, actuatorField string) error {
+	if !s.enabled() {
+		return nil
+	}
+	if s.max == nil {
+		return fmt.Errorf("%s is required when autoscaling is enabled", maxField)
+	}
+	if *s.max < 1 {
+		return fmt.Errorf("%s must be at least 1", maxField)
+	}
+	if s.min != nil {
+		if *s.min < 1 {
+			return fmt.Errorf("%s must be at least 1 (KServe WVA does not support scale-to-zero)", minField)
+		}
+		if *s.min > *s.max {
+			return fmt.Errorf("%s cannot exceed %s", minField, maxField)
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(s.actuator)) {
+	case "", components.ScalingActuatorHPA, components.ScalingActuatorKEDA:
+	default:
+		return fmt.Errorf("%s must be %s or %s", actuatorField, components.ScalingActuatorHPA, components.ScalingActuatorKEDA)
+	}
+	return nil
+}
+
+func buildScalingSpec(s workloadScaling) *kservev1alpha2.ScalingSpec {
+	if !s.enabled() || s.max == nil {
+		return nil
+	}
+	spec := &kservev1alpha2.ScalingSpec{
+		MinReplicas: s.min,
+		MaxReplicas: *s.max,
+		WVA:         &kservev1alpha2.WVASpec{},
+	}
+	if resolvedActuator(s.actuator) == components.ScalingActuatorHPA {
+		spec.WVA.HPA = &kservev1alpha2.HPAScalingSpec{}
+	} else {
+		spec.WVA.KEDA = &kservev1alpha2.KEDAScalingSpec{}
+	}
+	return spec
 }
 
 // validateLoRAParams checks llmEngine LoRA settings before sync.
@@ -366,8 +459,10 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 	}
 	spec.Model.LoRA = lora
 
-	// Static replicas from the component spec.
-	if comp.Replicas != nil {
+	// Static replicas, or WVA autoscaling (mutually exclusive on the CR).
+	if decode := decodeScaling(params); decode.enabled() {
+		spec.Scaling = buildScalingSpec(decode)
+	} else if comp.Replicas != nil {
 		spec.Replicas = comp.Replicas
 	}
 
@@ -461,7 +556,9 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 
 	if topo.EnablePrefill {
 		prefill := &kservev1alpha2.WorkloadSpec{}
-		if topo.PrefillReplicas != nil {
+		if scale := prefillScaling(topo); scale.enabled() {
+			prefill.Scaling = buildScalingSpec(scale)
+		} else if topo.PrefillReplicas != nil {
 			prefill.Replicas = topo.PrefillReplicas
 		}
 		spec.Prefill = prefill
