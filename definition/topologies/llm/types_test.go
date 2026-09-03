@@ -74,3 +74,20 @@ func TestUnmarshalTracing(t *testing.T) {
 		t.Fatalf("tracingEndpoint=%q", on.TracingEndpoint)
 	}
 }
+
+func TestUnmarshalPrefillScaling(t *testing.T) {
+	t.Parallel()
+	var got LlmTopologyParameters
+	if err := json.Unmarshal([]byte(`{"prefillMinReplicas":1,"prefillMaxReplicas":4,"prefillScalingActuator":"hpa"}`), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.PrefillMinReplicas == nil || *got.PrefillMinReplicas != 1 {
+		t.Fatalf("prefillMinReplicas=%v", got.PrefillMinReplicas)
+	}
+	if got.PrefillMaxReplicas == nil || *got.PrefillMaxReplicas != 4 {
+		t.Fatalf("prefillMaxReplicas=%v", got.PrefillMaxReplicas)
+	}
+	if got.PrefillScalingActuator != "hpa" {
+		t.Fatalf("prefillScalingActuator=%q", got.PrefillScalingActuator)
+	}
+}

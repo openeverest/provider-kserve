@@ -37,12 +37,16 @@ spec:
       # Disaggregated prefill/decode (llm-d pattern). Requires enough GPUs.
       enablePrefill: false
       # prefillReplicas: 1
+      # Prefill WVA autoscaling (mutually exclusive with prefillReplicas).
+      # prefillMinReplicas: 1
+      # prefillMaxReplicas: 4
+      # prefillScalingActuator: keda
 
   components:
     # vLLM inference engine (required).
     llmEngine:
       type: vllm
-      # Number of decode replicas.
+      # Number of decode replicas. Ignored when minReplicas/maxReplicas are set.
       replicas: 1
       # How the model is exposed (same pattern as MongoDB External access).
       # ClusterIP (default) keeps it in-cluster; LoadBalancer/NodePort create
@@ -66,6 +70,10 @@ spec:
         modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
         # Name advertised in the "model" field of inference requests.
         modelName: llama-3.1-8b-instruct
+        # WVA autoscaling (mutually exclusive with llmEngine.replicas).
+        # minReplicas: 1
+        # maxReplicas: 4
+        # scalingActuator: keda
         # Split the model across GPUs on a node.
         tensorParallelSize: 1
         # pipelineParallelSize: 1

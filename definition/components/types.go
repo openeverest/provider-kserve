@@ -113,11 +113,30 @@ type VllmCustomSpec struct {
 	LoraSlot1 string `json:"loraSlot1,omitempty"`
 	LoraSlot2 string `json:"loraSlot2,omitempty"`
 	LoraSlot3 string `json:"loraSlot3,omitempty"`
+
+	// MinReplicas is the WVA autoscaling floor for the decode workload.
+	// Setting MinReplicas or MaxReplicas enables KServe WorkloadSpec.Scaling
+	// (mutually exclusive with llmEngine.replicas). KServe requires ≥ 1;
+	// WVA does not scale to zero.
+	MinReplicas *int32 `json:"minReplicas,omitempty"`
+
+	// MaxReplicas is the WVA autoscaling ceiling for the decode workload.
+	// Required when autoscaling is enabled.
+	MaxReplicas *int32 `json:"maxReplicas,omitempty"`
+
+	// ScalingActuator selects the WVA actuator backend: "keda" (default) or "hpa".
+	// KEDA queries Prometheus directly; HPA needs a Prometheus Adapter.
+	ScalingActuator string `json:"scalingActuator,omitempty"`
 }
 
 const (
 	LoraDeploymentDisabled = "disabled"
 	LoraDeploymentEnabled  = "enabled"
+)
+
+const (
+	ScalingActuatorHPA  = "hpa"
+	ScalingActuatorKEDA = "keda"
 )
 
 const (
