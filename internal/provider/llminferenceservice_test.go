@@ -450,6 +450,12 @@ func TestValidateTensorGPU(t *testing.T) {
 	if err := validateTensorGPU(gpuResources("1"), ptr.To(int32(8)), true, "res"); err != nil {
 		t.Fatal(err)
 	}
+	// Limits govern scheduling; requests-only GPU is not compared to tensorParallelSize.
+	if err := validateTensorGPU(&corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{nvidiaGPUResource: resource.MustParse("1")},
+	}, ptr.To(int32(8)), false, "res"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestValidateLLMWorkers(t *testing.T) {

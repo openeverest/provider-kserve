@@ -273,13 +273,10 @@ func validateTensorGPU(res *corev1.ResourceRequirements, tp *int32, cpuProfile b
 	}
 	q, ok := res.Limits[nvidiaGPUResource]
 	if !ok {
-		q, ok = res.Requests[nvidiaGPUResource]
-	}
-	if !ok {
 		return nil
 	}
 	if q.Value() < int64(*tp) {
-		return fmt.Errorf("%s nvidia.com/gpu (%d) must be >= tensorParallelSize (%d)", path, q.Value(), *tp)
+		return fmt.Errorf("%s limits.nvidia.com/gpu (%d) must be >= tensorParallelSize (%d)", path, q.Value(), *tp)
 	}
 	return nil
 }
