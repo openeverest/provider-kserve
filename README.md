@@ -230,6 +230,18 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 | `runtime` | string | Explicitly select a (Cluster)ServingRuntime by name. |
 | `minReplicas` | int32 | Autoscaling floor (`0` enables scale-to-zero). |
 | `maxReplicas` | int32 | Autoscaling ceiling. |
+| `env` | []EnvVar | Extra environment variables on the predictor container. |
+| `args` | []string | Extra container args appended to the serving runtime. |
+| `nodeSelector` | map[string]string | Node labels the predictor pod must match. |
+| `tolerations` | []Toleration | Tolerations for tainted nodes. |
+
+`spec.components.predictor.affinity` is also copied onto the InferenceService predictor pod spec.
+
+### `predictor` topology parameters
+
+| Field | Type | Description |
+|---|---|---|
+| `externalAccess` | string | Client access path: `ClusterIP` (default), `LoadBalancer`, or `NodePort`. Takes precedence over `predictor.service.serviceType`. |
 
 ### `llm` topology parameters
 
@@ -277,6 +289,16 @@ curl http://localhost:8000/v1/models
 > This is plain Kubernetes exposure. The KServe-native Gateway API path
 > (`enableGatewayRouting`) is separate and additionally provisions a managed `Gateway` plus
 > `HTTPRoute` and the Inference Gateway scheduler.
+
+The `predictor` topology uses the same `externalAccess` values (`ClusterIP` /
+`LoadBalancer` / `NodePort`; no Envoy AI Gateway). KServe runtimes listen on
+**port 8080**; the provider-owned Service maps **80 → 8080**. Connection details
+use the LoadBalancer address or NodePort when those modes are selected, and the
+in-cluster `{instance}-predictor` Service otherwise.
+
+```bash
+kubectl port-forward svc/<instance>-predictor 8080:80
+```
 
 ### Envoy AI Gateway
 

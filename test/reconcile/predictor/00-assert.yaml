@@ -1,6 +1,6 @@
 # The provider must reconcile the Instance into a KServe InferenceService with
-# the requested model format, storage URI, and autoscaling bounds, in Standard
-# deployment mode (plain Deployment + HPA, no Knative).
+# the requested model format, storage URI, autoscaling bounds, and scheduling
+# overrides, in Standard deployment mode (plain Deployment + HPA, no Knative).
 #
 # The provider writes "Standard" directly. Before that it wrote the deprecated
 # "RawDeployment", which KServe's defaulting webhook rewrote to "Standard" on
@@ -15,7 +15,19 @@ spec:
   predictor:
     minReplicas: 1
     maxReplicas: 3
+    nodeSelector:
+      kubernetes.io/os: linux
+    tolerations:
+      - key: dedicated
+        operator: Equal
+        value: inference
+        effect: NoSchedule
     model:
       modelFormat:
         name: sklearn
       storageUri: gs://kfserving-examples/models/sklearn/1.0/model
+      env:
+        - name: OMP_NUM_THREADS
+          value: "1"
+      args:
+        - --strict-model-config=false

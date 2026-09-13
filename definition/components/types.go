@@ -8,6 +8,8 @@
 // +k8s:openapi-gen=true
 package components
 
+import corev1 "k8s.io/api/core/v1"
+
 // LoRAAdapterSpec identifies one LoRA fine-tune served alongside the base model.
 // Each adapter is addressable by name in OpenAI "model" requests once KServe
 // configures vLLM (--lora-modules).
@@ -170,4 +172,16 @@ type ModelServerCustomSpec struct {
 
 	// MaxReplicas is the autoscaling ceiling.
 	MaxReplicas *int32 `json:"maxReplicas,omitempty"`
+
+	// Env is appended to the predictor container (e.g. OMP_NUM_THREADS).
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// Args is appended to the serving-runtime command (e.g. Triton flags).
+	Args []string `json:"args,omitempty"`
+
+	// NodeSelector constrains predictor pods to matching nodes.
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// Tolerations allow predictor pods to schedule onto tainted nodes.
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 }

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-kserve-predictor-external
+spec:
+  type: LoadBalancer
+  selector:
+    app: isvc.test-kserve-predictor-predictor
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
