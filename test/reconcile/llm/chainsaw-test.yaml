@@ -28,7 +28,10 @@ spec:
       try:
         - script:
             content: kubectl -n $NAMESPACE delete instance/test-kserve-llm --wait=false
+        # KServe keeps LLMInferenceService until serving.kserve.io/llmisvc-finalizer
+        # finishes. The suite default of 30s is too short (CI run 35332449587).
         - error:
+            timeout: 2m
             file: 20-errors.yaml
         - wait:
             apiVersion: core.openeverest.io/v1alpha1
