@@ -230,6 +230,9 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 | `runtime` | string | Explicitly select a (Cluster)ServingRuntime by name. |
 | `minReplicas` | int32 | Autoscaling floor (`0` enables scale-to-zero). |
 | `maxReplicas` | int32 | Autoscaling ceiling. |
+| `storageContainer` | string | `ClusterStorageContainer` name. Maps to `spec.predictor.storageContainerName`. Empty lets KServe match on the URI scheme. |
+
+A cluster admin registers custom downloaders as cluster-scoped `ClusterStorageContainer` objects (`serving.kserve.io/v1alpha1`). The chart already installs the default one. To pin an Instance to a named container, set `storageContainer` and keep `supportedUriFormats` on that CR covering the Instance's `storageURI`. KServe rejects the download if the name is missing or the URI does not match. This field is predictor-only. `LLMInferenceService` in KServe `v0.20.0` has no equivalent.
 
 ### `llm` topology parameters
 

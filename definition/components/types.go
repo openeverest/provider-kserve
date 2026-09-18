@@ -170,4 +170,9 @@ type ModelServerCustomSpec struct {
 
 	// MaxReplicas is the autoscaling ceiling.
 	MaxReplicas *int32 `json:"maxReplicas,omitempty"`
+
+	// StorageContainer names a ClusterStorageContainer. When set, KServe uses
+	// that initializer instead of matching on the storage URI scheme
+	// (spec.predictor.storageContainerName).
+	StorageContainer string `json:"storageContainer,omitempty"`
 }
