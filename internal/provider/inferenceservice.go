@@ -13,8 +13,19 @@ import (
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-kserve/definition/components"
+	"github.com/openeverest/provider-kserve/definition/topologies/predictor"
 	"github.com/openeverest/provider-kserve/internal/common"
 )
+
+// predictorServingPort is the HTTP port KServe Standard-mode runtimes listen
+// on (kserve/kserve@v0.20.0 constants.InferenceServiceDefaultHttpPort).
+const predictorServingPort = 8080
+
+// predictorPodSelector matches Standard-mode predictor pods. Keep in sync with
+// KServe GetRawServiceLabel(PredictorServiceName(name)).
+func predictorPodSelector(instance string) map[string]string {
+	return map[string]string{"app": "isvc." + instance + "-predictor"}
+}
 
 // validatePredictor checks the Instance spec for the predictor topology.
 func validatePredictor(c *controller.Context) error {
@@ -96,7 +107,12 @@ func (p *Provider) syncPredictor(c *controller.Context) error {
 	if err != nil {
 		return err
 	}
-	return common.Apply(c.Context(), c.Client(), c.Instance(), isvc)
+	if err := common.Apply(c.Context(), c.Client(), c.Instance(), isvc); err != nil {
+		return err
+	}
+	var topo predictor.PredictorTopologyParameters
+	c.TryDecodeTopologyParameters(&topo)
+	return syncPodMonitor(c, topo.MetricsEnabled(), predictorPodSelector(c.Name()), predictorServingPort)
 }
 
 // statusPredictor translates the InferenceService status into a provider Status.

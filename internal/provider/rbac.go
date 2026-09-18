@@ -36,7 +36,7 @@ package provider
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch
 
-// Prometheus Operator PodMonitor emitted per llm Instance (optional metrics):
+// Prometheus Operator PodMonitor emitted per Instance (optional metrics):
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=podmonitors,verbs=get;list;watch;create;update;patch;delete
 
 // Core resources referenced by model serving (model credentials, endpoints).

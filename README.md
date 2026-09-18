@@ -66,7 +66,7 @@ provider itself is covered under [Installation](#installation).
 | Vertical scaling (CPU / memory) | ✅ | `spec.components.<name>.resources`; limits are mirrored into requests (Guaranteed QoS) |
 | Version upgrades | ✅ | of the deployed serving runtime version — change `spec.version`; see [Versions](#versions) |
 | Custom configuration | ✅ | structured parameters, plus an inline `LLMInferenceServiceConfig` escape hatch |
-| Monitoring | ✅ | a `PodMonitor` per `llm` Instance; gateway token/cost metrics when the AI Gateway is enabled |
+| Monitoring | ✅ | a `PodMonitor` per `llm` and `predictor` Instance; gateway token/cost metrics when the AI Gateway is enabled |
 | TLS | ✅ | optional HTTPS on the shared Envoy AI Gateway, issued by cert-manager |
 
 Models are pulled from the URI given in the component parameters (`hf://`, `s3://`, `gs://`,
@@ -230,6 +230,12 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 | `runtime` | string | Explicitly select a (Cluster)ServingRuntime by name. |
 | `minReplicas` | int32 | Autoscaling floor (`0` enables scale-to-zero). |
 | `maxReplicas` | int32 | Autoscaling ceiling. |
+
+### `predictor` topology parameters
+
+| Field | Type | Description |
+|---|---|---|
+| `enableMetrics` | bool | Emit a PodMonitor for this instance's predictor pods (`:8080/metrics`). Defaults to enabled. |
 
 ### `llm` topology parameters
 
@@ -555,8 +561,9 @@ external address across different environments:
 ### Observability
 
 Each `llm` Instance gets a `PodMonitor` so an existing Prometheus Operator scrapes vLLM's
-`:8000/metrics` (on by default; safely skipped when the `monitoring.coreos.com` CRDs are
-absent). See [docs/observability.md](docs/observability.md) and the
+`:8000/metrics`. Each `predictor` Instance gets one for the Standard-mode runtime
+`:8080/metrics`. Both are on by default and safely skipped when the `monitoring.coreos.com`
+CRDs are absent. See [docs/observability.md](docs/observability.md) and the
 [vLLM Grafana dashboard](docs/dashboards/vllm.json).
 
 When the AI Gateway is enabled, the chart also scrapes gateway `gen_ai.*` token/cost metrics.

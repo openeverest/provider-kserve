@@ -26,6 +26,18 @@ spec:
             file: 00-create-predictor.yaml
         - assert:
             file: 00-assert.yaml
+        # PodMonitor is only created when the Prometheus Operator CRD exists
+        # and ENABLE_POD_MONITOR=true. CI tilt bootstrap has the flag on and
+        # no CRD, so apply is a no-op there (same as llm).
+        - script:
+            content: |
+              if ! kubectl api-resources --api-group=monitoring.coreos.com -o name | grep -q '^podmonitors$'; then
+                echo "PodMonitor CRD absent; skip existence check"
+                exit 0
+              fi
+              kubectl -n "$NAMESPACE" get podmonitor test-kserve-predictor-metrics
+              app=$(kubectl -n "$NAMESPACE" get podmonitor test-kserve-predictor-metrics -o jsonpath='{.spec.selector.matchLabels.app}')
+              test "$app" = "isvc.test-kserve-predictor-predictor"
 
     - name: delete-predictor
       try:
