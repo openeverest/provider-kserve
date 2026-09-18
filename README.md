@@ -230,6 +230,11 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 | `runtime` | string | Explicitly select a (Cluster)ServingRuntime by name. |
 | `minReplicas` | int32 | Autoscaling floor (`0` enables scale-to-zero). |
 | `maxReplicas` | int32 | Autoscaling ceiling. |
+| `serviceAccountName` | string | ServiceAccount the predictor pods run as. Empty uses the namespace default. |
+| `labels` | map | Merged onto the InferenceService and `spec.predictor.labels` (KServe copies these to pods). YAML-only. |
+| `annotations` | map | Merged onto the InferenceService and `spec.predictor.annotations`. Cannot override `serving.kserve.io/deploymentMode`. YAML-only. |
+| `securityContext` | object | Pod-level `securityContext` on the predictor. YAML-only. |
+| `containerSecurityContext` | object | Container-level `securityContext` on the model container. YAML-only. |
 
 ### `llm` topology parameters
 

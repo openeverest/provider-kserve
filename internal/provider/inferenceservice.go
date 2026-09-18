@@ -75,10 +75,36 @@ func buildInferenceService(c *controller.Context) (*kservev1beta1.InferenceServi
 	if params.MaxReplicas != nil {
 		predictor.MaxReplicas = *params.MaxReplicas
 	}
+	if params.ServiceAccountName != "" {
+		predictor.ServiceAccountName = params.ServiceAccountName
+	}
+	if params.SecurityContext != nil {
+		predictor.SecurityContext = params.SecurityContext
+	}
+	if params.ContainerSecurityContext != nil {
+		model.SecurityContext = params.ContainerSecurityContext
+	}
+	if len(params.Labels) > 0 {
+		predictor.Labels = params.Labels
+	}
+	if len(params.Annotations) > 0 {
+		predictor.Annotations = params.Annotations
+	}
 
 	meta := c.ObjectMeta(c.Name())
+	if len(params.Labels) > 0 {
+		if meta.Labels == nil {
+			meta.Labels = map[string]string{}
+		}
+		for k, v := range params.Labels {
+			meta.Labels[k] = v
+		}
+	}
 	if meta.Annotations == nil {
 		meta.Annotations = map[string]string{}
+	}
+	for k, v := range params.Annotations {
+		meta.Annotations[k] = v
 	}
 	meta.Annotations[common.DeploymentModeAnnotation] = common.DeploymentModeStandard
 

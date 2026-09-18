@@ -9,13 +9,25 @@ apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
   name: test-kserve-predictor
+  labels:
+    cost-center: ml
   annotations:
     serving.kserve.io/deploymentMode: Standard
+    azure.workload.identity/use: "true"
 spec:
   predictor:
     minReplicas: 1
     maxReplicas: 3
+    serviceAccountName: predictor-sa
+    labels:
+      cost-center: ml
+    annotations:
+      azure.workload.identity/use: "true"
+    securityContext:
+      runAsNonRoot: true
     model:
       modelFormat:
         name: sklearn
       storageUri: gs://kfserving-examples/models/sklearn/1.0/model
+      securityContext:
+        allowPrivilegeEscalation: false
