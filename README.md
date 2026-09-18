@@ -230,6 +230,7 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 | `runtime` | string | Explicitly select a (Cluster)ServingRuntime by name. |
 | `minReplicas` | int32 | Autoscaling floor (`0` enables scale-to-zero). |
 | `maxReplicas` | int32 | Autoscaling ceiling. |
+| `storageContainer` | string | `ClusterStorageContainer` name. Maps to `spec.predictor.storageContainerName`. Empty lets KServe match on the URI scheme. |
 
 ### `llm` topology parameters
 

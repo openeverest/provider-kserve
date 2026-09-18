@@ -54,6 +54,17 @@ ui:
           path: spec.components.predictor.parameters.runtimeVersion
           fieldParams:
             label: Runtime Version
+        storageContainer:
+          uiType: text
+          path: spec.components.predictor.parameters.storageContainer
+          fieldParams:
+            label: Storage Container
+      componentsOrder:
+      - version
+      - modelFormat
+      - storageURI
+      - runtimeVersion
+      - storageContainer
     scaling:
       label: Scaling
       description: Configure autoscaling bounds for the predictor.
