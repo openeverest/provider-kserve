@@ -1,5 +1,5 @@
-# Create a predictor Instance and let the provider translate it into a KServe
-# InferenceService CR.
+# Switch the same Instance to LoadBalancer so the provider creates an owned
+# external Service in front of the InferenceService predictor pods.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
@@ -9,6 +9,8 @@ spec:
     name: provider-kserve
   topology:
     type: predictor
+    parameters:
+      externalAccess: LoadBalancer
   components:
     predictor:
       type: modelServer
@@ -22,15 +24,3 @@ spec:
         storageURI: gs://kfserving-examples/models/sklearn/1.0/model
         minReplicas: 1
         maxReplicas: 3
-        env:
-          - name: OMP_NUM_THREADS
-            value: "1"
-        args:
-          - --strict-model-config=false
-        nodeSelector:
-          kubernetes.io/os: linux
-        tolerations:
-          - key: dedicated
-            operator: Equal
-            value: inference
-            effect: NoSchedule

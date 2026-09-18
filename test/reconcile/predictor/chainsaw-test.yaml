@@ -18,7 +18,7 @@ spec:
     model and real timeouts, not in the per-PR suite.
   catch:
     - script:
-        content: kubectl -n $NAMESPACE get instance,inferenceservice -o yaml
+        content: kubectl -n $NAMESPACE get instance,inferenceservice,svc -o yaml
   steps:
     - name: create-predictor
       try:
@@ -26,6 +26,13 @@ spec:
             file: 00-create-predictor.yaml
         - assert:
             file: 00-assert.yaml
+
+    - name: expose-loadbalancer
+      try:
+        - apply:
+            file: 10-expose-lb.yaml
+        - assert:
+            file: 10-assert-service.yaml
 
     - name: delete-predictor
       try:

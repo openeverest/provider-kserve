@@ -18,6 +18,7 @@
 # See github.com/openeverest/provider-sdk/blob/main/PROVIDER_DEVELOPMENT.md
 # for detailed guidance.
 config:
+  parametersSchema: PredictorTopologyParameters
   components:
     predictor:
       defaults:
@@ -54,6 +55,26 @@ ui:
           path: spec.components.predictor.parameters.runtimeVersion
           fieldParams:
             label: Runtime Version
+        runtime:
+          uiType: text
+          path: spec.components.predictor.parameters.runtime
+          fieldParams:
+            label: Serving runtime
+            placeholder: kserve-sklearnserver
+        nodeSelector:
+          uiType: keyValue
+          path: spec.components.predictor.parameters.nodeSelector
+          fieldParams:
+            label: Node selector
+        # env, args, and tolerations are YAML-only: the form generator has no
+        # list-of-object control that matches []EnvVar / []string / []Toleration.
+      componentsOrder:
+      - version
+      - modelFormat
+      - storageURI
+      - runtime
+      - runtimeVersion
+      - nodeSelector
     scaling:
       label: Scaling
       description: Configure autoscaling bounds for the predictor.
@@ -74,6 +95,28 @@ ui:
           validation:
             min: 0
             max: 32
+      componentsOrder:
+      - minReplicas
+      - maxReplicas
+    routing:
+      label: Routing
+      description: How clients reach this model. ClusterIP stays in-cluster; LoadBalancer and NodePort create a provider-owned Service in front of the predictor pods.
+      components:
+        externalAccess:
+          uiType: select
+          path: spec.topology.parameters.externalAccess
+          fieldParams:
+            label: External access
+            options:
+            - label: ClusterIP
+              value: ClusterIP
+            - label: LoadBalancer
+              value: LoadBalancer
+            - label: NodePort
+              value: NodePort
+      componentsOrder:
+      - externalAccess
   sectionsOrder:
   - basicInfo
   - scaling
+  - routing

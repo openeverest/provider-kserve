@@ -25,6 +25,9 @@ spec:
   # Topology configuration — predictive model serving.
   topology:
     type: predictor
+    parameters:
+      # ClusterIP (default) | LoadBalancer | NodePort
+      # externalAccess: ClusterIP
 
   components:
     # Model server (required).
@@ -48,3 +51,14 @@ spec:
         maxReplicas: 3
         # runtimeVersion: "v2"
         # runtime: kserve-sklearnserver
+        # env:
+        #   - name: OMP_NUM_THREADS
+        #     value: "1"
+        # args:
+        #   - --strict-model-config=false
+        # nodeSelector:
+        #   kubernetes.io/os: linux
+        # tolerations:
+        #   - key: nvidia.com/gpu
+        #     operator: Exists
+        #     effect: NoSchedule

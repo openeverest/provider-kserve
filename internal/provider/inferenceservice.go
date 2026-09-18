@@ -3,18 +3,40 @@ package provider
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 	"knative.dev/pkg/apis"
 
 	kservev1beta1 "github.com/kserve/kserve/pkg/apis/serving/v1beta1"
+	kserveconstants "github.com/kserve/kserve/pkg/constants"
 
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-kserve/definition/components"
+	"github.com/openeverest/provider-kserve/definition/topologies/predictor"
 	"github.com/openeverest/provider-kserve/internal/common"
 )
+
+const (
+	// predictorContainerPort is the HTTP port KServe runtimes listen on.
+	predictorContainerPort = 8080
+	// predictorServicePort is the port KServe's in-cluster predictor Service
+	// exposes (CommonDefaultHttpPort). The provider-owned external Service
+	// uses the same mapping: 80 → 8080.
+	predictorServicePort = 80
+)
+
+// predictorPodSelector returns the label selector KServe stamps on Standard-mode
+// InferenceService predictor pods. Keep in sync with GetRawServiceLabel +
+// PredictorServiceName.
+func predictorPodSelector(instance string) map[string]string {
+	return map[string]string{
+		"app": kserveconstants.GetRawServiceLabel(kserveconstants.PredictorServiceName(instance)),
+	}
+}
 
 // validatePredictor checks the Instance spec for the predictor topology.
 func validatePredictor(c *controller.Context) error {
@@ -33,6 +55,21 @@ func validatePredictor(c *controller.Context) error {
 	}
 	if params.MinReplicas != nil && *params.MinReplicas < 0 {
 		return fmt.Errorf("%s.parameters.minReplicas must not be negative", common.ComponentPredictor)
+	}
+	if comp.Service != nil {
+		switch comp.Service.ServiceType {
+		case "", corev1.ServiceTypeClusterIP, corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeNodePort:
+		default:
+			return fmt.Errorf("%s.service.serviceType must be one of ClusterIP, LoadBalancer or NodePort", common.ComponentPredictor)
+		}
+	}
+
+	var topo predictor.PredictorTopologyParameters
+	c.TryDecodeTopologyParameters(&topo)
+	switch topo.ExternalAccess {
+	case "", predictor.ExternalAccessClusterIP, predictor.ExternalAccessLoadBalancer, predictor.ExternalAccessNodePort:
+	default:
+		return fmt.Errorf("externalAccess must be one of ClusterIP, LoadBalancer or NodePort")
 	}
 	return nil
 }
@@ -63,17 +100,32 @@ func buildInferenceService(c *controller.Context) (*kservev1beta1.InferenceServi
 	if comp.Resources != nil {
 		model.Resources = *comp.Resources
 	}
+	if len(params.Env) > 0 {
+		model.Env = params.Env
+	}
+	if len(params.Args) > 0 {
+		model.Args = params.Args
+	}
 
-	predictor := kservev1beta1.PredictorSpec{Model: model}
+	predictorSpec := kservev1beta1.PredictorSpec{Model: model}
+	if len(params.NodeSelector) > 0 {
+		predictorSpec.NodeSelector = params.NodeSelector
+	}
+	if len(params.Tolerations) > 0 {
+		predictorSpec.Tolerations = params.Tolerations
+	}
+	if comp.Affinity != nil {
+		predictorSpec.Affinity = comp.Affinity
+	}
 
 	switch {
 	case params.MinReplicas != nil:
-		predictor.MinReplicas = params.MinReplicas
+		predictorSpec.MinReplicas = params.MinReplicas
 	case comp.Replicas != nil:
-		predictor.MinReplicas = comp.Replicas
+		predictorSpec.MinReplicas = comp.Replicas
 	}
 	if params.MaxReplicas != nil {
-		predictor.MaxReplicas = *params.MaxReplicas
+		predictorSpec.MaxReplicas = *params.MaxReplicas
 	}
 
 	meta := c.ObjectMeta(c.Name())
@@ -85,18 +137,40 @@ func buildInferenceService(c *controller.Context) (*kservev1beta1.InferenceServi
 	return &kservev1beta1.InferenceService{
 		ObjectMeta: meta,
 		Spec: kservev1beta1.InferenceServiceSpec{
-			Predictor: predictor,
+			Predictor: predictorSpec,
 		},
 	}, nil
 }
 
-// syncPredictor creates or updates the InferenceService.
+// syncPredictor creates or updates the InferenceService and optional external Service.
 func (p *Provider) syncPredictor(c *controller.Context) error {
 	isvc, err := buildInferenceService(c)
 	if err != nil {
 		return err
 	}
-	return common.Apply(c.Context(), c.Client(), c.Instance(), isvc)
+	if err := common.Apply(c.Context(), c.Client(), c.Instance(), isvc); err != nil {
+		return err
+	}
+	return ensurePredictorExternalService(c)
+}
+
+func ensurePredictorExternalService(c *controller.Context) error {
+	comp := c.Instance().Spec.Components[common.ComponentPredictor]
+	return reconcileExternalService(
+		c,
+		comp.Service,
+		predictorServiceType(c),
+		predictorPodSelector(c.Name()),
+		predictorServicePort,
+		predictorContainerPort,
+	)
+}
+
+func predictorServiceType(c *controller.Context) corev1.ServiceType {
+	comp := c.Instance().Spec.Components[common.ComponentPredictor]
+	var topo predictor.PredictorTopologyParameters
+	c.TryDecodeTopologyParameters(&topo)
+	return resolveServiceType(topo.ResolvedServiceType(), comp.Service)
 }
 
 // statusPredictor translates the InferenceService status into a provider Status.
@@ -108,11 +182,12 @@ func (p *Provider) statusPredictor(c *controller.Context) (controller.Status, er
 
 	ready := isvc.Status.GetCondition(apis.ConditionReady)
 	if ready != nil && ready.IsTrue() {
-		// A Ready service without external ingress exposes only the in-cluster
-		// Service and KServe leaves Status.URL empty, so surface Ready with
-		// connection details only when a URL is actually published.
-		if isvc.Status.URL != nil {
-			return controller.ReadyWithConnectionDetails(connectionDetails(isvc.Status.URL)), nil
+		details, err := p.predictorConnectionDetails(c, isvc)
+		if err != nil {
+			return controller.Provisioning(err.Error()), nil
+		}
+		if details != nil {
+			return controller.ReadyWithConnectionDetails(*details), nil
 		}
 		return controller.Ready(), nil
 	}
@@ -123,6 +198,25 @@ func (p *Provider) statusPredictor(c *controller.Context) (controller.Status, er
 	// model), so surface it as Provisioning and let the condition message
 	// explain the current state rather than flipping the Instance to Failed.
 	return controller.Provisioning(conditionMessage(ready, "InferenceService is being created")), nil
+}
+
+// predictorConnectionDetails resolves how to reach a Ready InferenceService.
+// LoadBalancer/NodePort win over KServe Status.URL so the provider-owned
+// Service address is what clients see. Returns nil (Ready without details)
+// when that external address is not assigned yet.
+func (p *Provider) predictorConnectionDetails(c *controller.Context, isvc *kservev1beta1.InferenceService) (*controller.ConnectionDetails, error) {
+	svcType := predictorServiceType(c)
+	switch svcType {
+	case corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeNodePort:
+		return p.externalServiceConnectionDetails(c, svcType, predictorServicePort)
+	}
+	if isvc.Status.URL != nil {
+		d := connectionDetails(isvc.Status.URL)
+		return &d, nil
+	}
+	host := fmt.Sprintf("%s.%s.svc.cluster.local", kserveconstants.PredictorServiceName(c.Name()), c.Namespace())
+	d := kserveConnectionDetails(host, strconv.Itoa(predictorServicePort))
+	return &d, nil
 }
 
 // connectionDetails builds ConnectionDetails from a KServe status URL.
