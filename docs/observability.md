@@ -19,9 +19,10 @@ aggregate.
 ## How it works
 
 When `metrics.podMonitor.enabled` is on (the default), the provider creates one
-`PodMonitor` (`monitoring.coreos.com/v1`) per `llm` Instance, owned by that
-Instance. The Prometheus Operator turns that `PodMonitor` into a scrape job; the
-existing Prometheus then scrapes the vLLM `:8000/metrics` endpoint directly.
+`PodMonitor` (`monitoring.coreos.com/v1`) per Instance, owned by that Instance.
+The Prometheus Operator turns that `PodMonitor` into a scrape job. `llm`
+scrapes vLLM `:8000/metrics`; `predictor` scrapes the Standard-mode runtime
+`:8080/metrics`.
 
 ```mermaid
 flowchart TB
@@ -101,8 +102,8 @@ Other gotchas:
 - **Namespace rule** → a `PodMonitor` (default `namespaceSelector`) matches only
   pods in **its own** namespace; the provider places it alongside the workload,
   which is correct.
-- **Port** → hardcoded to `8000` (the vLLM OpenAI server port, which also serves
-  `/metrics`). A different runtime port is a parameter to `buildPodMonitor`.
+- **Port** → `8000` for `llm` (vLLM), `8080` for `predictor` (KServe
+  Standard-mode HTTP). Both serve `/metrics` on that port.
 - **Orphans on disable** → flipping the flag off does not delete existing
   `PodMonitor`s; they are harmless and garbage-collected when the Instance is
   deleted.

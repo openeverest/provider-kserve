@@ -9,10 +9,22 @@ import (
 func TestBuildPodMonitor(t *testing.T) {
 	t.Parallel()
 
-	pm := buildPodMonitor("chat", "models", workloadPodSelector("chat"), vllmServingPort, "/metrics", "30s")
+	t.Run("llm", func(t *testing.T) {
+		t.Parallel()
+		assertPodMonitor(t, "chat", workloadPodSelector("chat"), vllmServingPort)
+	})
+	t.Run("predictor", func(t *testing.T) {
+		t.Parallel()
+		assertPodMonitor(t, "sklearn", predictorPodSelector("sklearn"), predictorServingPort)
+	})
+}
 
-	if pm.GetName() != "chat-metrics" {
-		t.Fatalf("name = %q, want chat-metrics", pm.GetName())
+func assertPodMonitor(t *testing.T, name string, selector map[string]string, port int) {
+	t.Helper()
+	pm := buildPodMonitor(name, "models", selector, port, "/metrics", "30s")
+
+	if pm.GetName() != name+"-metrics" {
+		t.Fatalf("name = %q, want %s-metrics", pm.GetName(), name)
 	}
 	if pm.GetNamespace() != "models" {
 		t.Fatalf("namespace = %q, want models", pm.GetNamespace())
@@ -25,7 +37,7 @@ func TestBuildPodMonitor(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("matchLabels found %t, err %v", found, err)
 	}
-	for k, want := range workloadPodSelector("chat") {
+	for k, want := range selector {
 		if labels[k] != want {
 			t.Fatalf("selector[%q] = %q, want %q", k, labels[k], want)
 		}
@@ -36,8 +48,8 @@ func TestBuildPodMonitor(t *testing.T) {
 		t.Fatalf("podMetricsEndpoints = %#v, found %t, err %v", eps, found, err)
 	}
 	ep := eps[0].(map[string]any)
-	if ep["targetPort"] != int64(vllmServingPort) {
-		t.Fatalf("targetPort = %v, want %d", ep["targetPort"], vllmServingPort)
+	if ep["targetPort"] != int64(port) {
+		t.Fatalf("targetPort = %v, want %d", ep["targetPort"], port)
 	}
 	if ep["path"] != "/metrics" {
 		t.Fatalf("path = %v, want /metrics", ep["path"])
