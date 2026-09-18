@@ -58,10 +58,7 @@ ui:
           uiType: text
           path: spec.components.predictor.parameters.storageContainer
           fieldParams:
-            label: Storage container
-            helperText: >-
-              ClusterStorageContainer name. Empty lets KServe pick one from
-              the storage URI scheme.
+            label: Storage Container
       componentsOrder:
       - version
       - modelFormat
