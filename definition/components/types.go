@@ -182,4 +182,25 @@ type ModelServerCustomSpec struct {
 
 	// MaxReplicas is the autoscaling ceiling.
 	MaxReplicas *int32 `json:"maxReplicas,omitempty"`
+
+	// ServiceAccountName is the ServiceAccount the predictor pods run as.
+	// Empty keeps the cluster default.
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// Labels are merged onto the InferenceService and copied to
+	// spec.predictor.labels so KServe stamps them on predictor pods
+	// (kserve/kserve@v0.20.0 components/predictor.go).
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Annotations are merged onto the InferenceService and copied to
+	// spec.predictor.annotations so KServe stamps them on predictor pods.
+	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// SecurityContext is the pod-level security context
+	// (spec.predictor.securityContext).
+	SecurityContext *corev1.PodSecurityContext `json:"securityContext,omitempty"`
+
+	// ContainerSecurityContext is the kserve-container security context
+	// (spec.predictor.model.securityContext).
+	ContainerSecurityContext *corev1.SecurityContext `json:"containerSecurityContext,omitempty"`
 }

@@ -54,6 +54,21 @@ ui:
           path: spec.components.predictor.parameters.runtimeVersion
           fieldParams:
             label: Runtime Version
+        serviceAccountName:
+          uiType: text
+          path: spec.components.predictor.parameters.serviceAccountName
+          fieldParams:
+            label: Service Account
+            helperText: >-
+              ServiceAccount the predictor pods run as. Leave empty for the
+              namespace default. labels, annotations, and securityContext are
+              YAML-only.
+      componentsOrder:
+      - version
+      - modelFormat
+      - storageURI
+      - runtimeVersion
+      - serviceAccountName
     scaling:
       label: Scaling
       description: Configure autoscaling bounds for the predictor.
