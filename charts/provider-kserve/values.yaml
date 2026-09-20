@@ -130,8 +130,8 @@ presets:
           # check. Limits are mirrored into requests (Guaranteed QoS).
           resources:
             limits:
-              cpu: "4"
-              memory: 16Gi
+              cpu: "2"
+              memory: 6Gi
           service:
             serviceType: ClusterIP
           parameters:
@@ -155,8 +155,8 @@ presets:
           replicas: 1
           resources:
             requests:
-              cpu: "4"
-              memory: 16Gi
+              cpu: "2"
+              memory: 12Gi
             limits:
               nvidia.com/gpu: "1"
           service:
