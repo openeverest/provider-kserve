@@ -352,9 +352,25 @@ envoyGateway:
 
 When the URL is omitted, no `BackendTrafficPolicy` is created. When configured, the quota is
 keyed by both `x-user-id` and model, request cost is zero, and the response's
-`llm_total_token` metadata is charged. Exhausted quotas return HTTP 429. Gateway TLS does not
-add API-key authentication or backend TLS; configure those separately before exposing the
-endpoint to untrusted networks.
+`llm_total_token` metadata is charged. Exhausted quotas return HTTP 429.
+
+Client auth is off until you set it. Create an Opaque Secret in the release namespace
+(each key is a client id, each value is the API key), then:
+
+```yaml
+aiGateway:
+  enabled: true
+  auth:
+    enabled: true
+    existingSecretName: ai-gateway-keys
+```
+
+The chart attaches a `SecurityPolicy` to the shared Gateway. Clients send `x-api-key`.
+A missing or unknown key returns HTTP 401. JWT and OIDC are not rendered; apply a
+`SecurityPolicy` yourself (see [deployment-guide](docs/deployment-guide.md#2-authentication)).
+
+TLS is not login. A LoadBalancer or port-forward to the model pod skips the Gateway, so
+it also skips this policy. Backend TLS to the pod is still separate.
 
 ### Model catalog
 

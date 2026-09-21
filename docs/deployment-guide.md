@@ -543,14 +543,16 @@ tls:
 
 ### 2. Authentication
 
-The AI Gateway does not enforce authentication by default. Add API key or
-JWT validation via Envoy Gateway's `SecurityPolicy`:
+API key on the shared Gateway is a chart flag. Create the Secret first, then
+set `aiGateway.auth.enabled` and `aiGateway.auth.existingSecretName`. Clients
+send `x-api-key`. JWT and OIDC are not in the chart. Attach a `SecurityPolicy`
+yourself if you need them:
 
 ```yaml
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:
-  name: ai-gateway-auth
+  name: ai-gateway-jwt
 spec:
   targetRefs:
   - group: gateway.networking.k8s.io

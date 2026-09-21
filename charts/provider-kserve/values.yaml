@@ -459,6 +459,14 @@ aiGateway:
   gatewayService:
     # -- Envoy proxy Service type (LoadBalancer, NodePort, or ClusterIP)
     type: LoadBalancer
+  # Client auth on the shared Gateway (Envoy SecurityPolicy + apiKeyAuth).
+  # Off by default. JWT / OIDC are not rendered; attach a SecurityPolicy yourself.
+  # A LoadBalancer or port-forward to the model pod skips this policy.
+  auth:
+    # -- Render a SecurityPolicy that requires x-api-key on the shared Gateway
+    enabled: false
+    # -- Existing Opaque Secret in the release namespace. Keys are client ids, values are API keys.
+    existingSecretName: ""
 
 # Envoy Gateway subchart configuration required by Envoy AI Gateway v0.4.
 envoy-gateway:
