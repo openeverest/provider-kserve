@@ -619,3 +619,170 @@ func TestBuildLLMInferenceServiceWorkers(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildLLMInferenceServiceGPULibraryPath(t *testing.T) {
+	t.Parallel()
+
+	hasLibraryPath := func(c corev1.Container) bool {
+		for _, e := range c.Env {
+			if e.Name == "LIBRARY_PATH" && e.Value == "/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64" {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("gpu decode sets LIBRARY_PATH", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Spec.Template == nil || len(got.Spec.Template.Containers) != 1 {
+			t.Fatalf("template = %#v", got.Spec.Template)
+		}
+		if !hasLibraryPath(got.Spec.Template.Containers[0]) {
+			t.Fatalf("gpu main missing LIBRARY_PATH: %#v", got.Spec.Template.Containers[0].Env)
+		}
+	})
+
+	t.Run("cpu profile omits LIBRARY_PATH", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, nil, components.VllmCustomSpec{
+			ComputeProfile: "cpu",
+		}, llm.LlmTopologyParameters{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Spec.Template != nil {
+			for _, c := range got.Spec.Template.Containers {
+				if hasLibraryPath(c) {
+					t.Fatalf("cpu profile should not set LIBRARY_PATH: %#v", c.Env)
+				}
+			}
+		}
+	})
+
+	t.Run("gpu worker and prefill set LIBRARY_PATH", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContextWithResources(t, nil, gpuResources("2"), components.VllmCustomSpec{
+			WorkerCount:          ptr.To(int32(1)),
+			PipelineParallelSize: ptr.To(int32(2)),
+		}, llm.LlmTopologyParameters{
+			EnablePrefill:               true,
+			PrefillWorkerCount:          ptr.To(int32(1)),
+			PrefillPipelineParallelSize: ptr.To(int32(2)),
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Spec.Worker == nil || !hasLibraryPath(got.Spec.Worker.Containers[0]) {
+			t.Fatalf("worker missing LIBRARY_PATH: %#v", got.Spec.Worker)
+		}
+		if got.Spec.Prefill == nil || got.Spec.Prefill.Template == nil || !hasLibraryPath(got.Spec.Prefill.Template.Containers[0]) {
+			t.Fatalf("prefill main missing LIBRARY_PATH: %#v", got.Spec.Prefill)
+		}
+		if got.Spec.Prefill.Worker == nil || !hasLibraryPath(got.Spec.Prefill.Worker.Containers[0]) {
+			t.Fatalf("prefill worker missing LIBRARY_PATH: %#v", got.Spec.Prefill.Worker)
+		}
+	})
+}
+
+func TestBuildLLMInferenceServiceGPUCount(t *testing.T) {
+	t.Parallel()
+
+	gpuLimit := func(c corev1.Container) int64 {
+		q := c.Resources.Limits[nvidiaGPUResource]
+		return q.Value()
+	}
+
+	t.Run("gpu profile defaults to 1 gpu", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Spec.Template == nil || gpuLimit(got.Spec.Template.Containers[0]) != 1 {
+			t.Fatalf("main gpu = %#v, want 1", got.Spec.Template)
+		}
+	})
+
+	t.Run("gpuCount sets head, worker and prefill", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, nil, components.VllmCustomSpec{
+			GpuCount:             ptr.To(int32(4)),
+			WorkerCount:          ptr.To(int32(1)),
+			PipelineParallelSize: ptr.To(int32(2)),
+		}, llm.LlmTopologyParameters{
+			EnablePrefill:               true,
+			PrefillWorkerCount:          ptr.To(int32(1)),
+			PrefillPipelineParallelSize: ptr.To(int32(2)),
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gpuLimit(got.Spec.Template.Containers[0]) != 4 {
+			t.Fatalf("head gpu = %d, want 4", gpuLimit(got.Spec.Template.Containers[0]))
+		}
+		if got.Spec.Worker == nil || gpuLimit(got.Spec.Worker.Containers[0]) != 4 {
+			t.Fatalf("worker gpu = %#v, want 4", got.Spec.Worker)
+		}
+		if got.Spec.Prefill == nil || got.Spec.Prefill.Template == nil || gpuLimit(got.Spec.Prefill.Template.Containers[0]) != 4 {
+			t.Fatalf("prefill gpu = %#v, want 4", got.Spec.Prefill)
+		}
+		if got.Spec.Prefill.Worker == nil || gpuLimit(got.Spec.Prefill.Worker.Containers[0]) != 4 {
+			t.Fatalf("prefill worker gpu = %#v, want 4", got.Spec.Prefill.Worker)
+		}
+	})
+
+	t.Run("cpu profile sets no gpu", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, nil, components.VllmCustomSpec{
+			ComputeProfile: "cpu",
+		}, llm.LlmTopologyParameters{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Spec.Template != nil {
+			if _, ok := got.Spec.Template.Containers[0].Resources.Limits[nvidiaGPUResource]; ok {
+				t.Fatal("cpu profile must not request a GPU")
+			}
+		}
+	})
+}
+
+func TestValidateLLMGpuCount(t *testing.T) {
+	t.Parallel()
+
+	t.Run("gpuCount on cpu profile errors", func(t *testing.T) {
+		t.Parallel()
+		err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{
+			ComputeProfile: "cpu",
+			GpuCount:       ptr.To(int32(1)),
+		}, llm.LlmTopologyParameters{}))
+		if err == nil {
+			t.Fatal("expected error for gpuCount on cpu profile")
+		}
+	})
+
+	t.Run("gpuCount below tensorParallelSize errors", func(t *testing.T) {
+		t.Parallel()
+		err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{
+			GpuCount:           ptr.To(int32(1)),
+			TensorParallelSize: ptr.To(int32(2)),
+		}, llm.LlmTopologyParameters{}))
+		if err == nil {
+			t.Fatal("expected GPU/TP error")
+		}
+	})
+
+	t.Run("gpuCount meets tensorParallelSize", func(t *testing.T) {
+		t.Parallel()
+		if err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{
+			GpuCount:           ptr.To(int32(2)),
+			TensorParallelSize: ptr.To(int32(2)),
+		}, llm.LlmTopologyParameters{})); err != nil {
+			t.Fatal(err)
+		}
+	})
+}

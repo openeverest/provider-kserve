@@ -73,6 +73,13 @@ type VllmCustomSpec struct {
 	// CUDA presets. This is a convenience over setting baseRefs directly.
 	ComputeProfile string `json:"computeProfile,omitempty"`
 
+	// GpuCount is the number of GPUs (nvidia.com/gpu) each vLLM pod requests
+	// (head and every worker). The GPU presets carry no GPU limit, so the provider
+	// injects this into the model container's resource limits; without it the pod
+	// schedules onto any node and vLLM fails to find a device. Defaults to 1 on
+	// the GPU profile. Leave unset for the CPU profile. Must be >= tensorParallelSize.
+	GpuCount *int32 `json:"gpuCount,omitempty"`
+
 	// KVCacheSpaceGi overrides VLLM_CPU_KVCACHE_SPACE (GiB) for the CPU profile.
 	// Left unset, vLLM auto-sizes the KV cache from the memory that is free at
 	// startup (recommended), which adapts to the node. Set it only to cap the KV

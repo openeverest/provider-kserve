@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"knative.dev/pkg/apis"
@@ -54,6 +55,12 @@ const (
 	vllmServingPort = 8000
 
 	nvidiaGPUResource = corev1.ResourceName("nvidia.com/gpu")
+
+	// gpuLibraryPathEnvVar / gpuLibraryPathValue add the NVIDIA driver lib dir to
+	// the compile-time linker search path for the GPU profile. See
+	// gpuLibraryPathEnv for the full rationale.
+	gpuLibraryPathEnvVar = "LIBRARY_PATH"
+	gpuLibraryPathValue  = "/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64"
 )
 
 // workloadPodSelector returns the label selector KServe stamps on an
@@ -166,11 +173,20 @@ func validateLLM(c *controller.Context) error {
 		return err
 	}
 	cpuProfile := strings.EqualFold(params.ComputeProfile, computeProfileCPU)
-	if err := validateTensorGPU(comp.Resources, params.TensorParallelSize, cpuProfile, common.ComponentLlmEngine+".resources"); err != nil {
+	if params.GpuCount != nil {
+		if cpuProfile {
+			return fmt.Errorf("%s.parameters.gpuCount is only valid for the GPU compute profile", common.ComponentLlmEngine)
+		}
+		if *params.GpuCount < 1 {
+			return fmt.Errorf("%s.parameters.gpuCount must be at least 1", common.ComponentLlmEngine)
+		}
+	}
+	effRes := withGPUCount(comp.Resources, params.GpuCount, cpuProfile)
+	if err := validateTensorGPU(effRes, params.TensorParallelSize, cpuProfile, common.ComponentLlmEngine+".resources"); err != nil {
 		return err
 	}
 	if params.WorkerCount != nil {
-		if err := validateTensorGPU(overlayResources(comp.Resources, params.WorkerResources), params.TensorParallelSize, cpuProfile, common.ComponentLlmEngine+".parameters.workerResources"); err != nil {
+		if err := validateTensorGPU(overlayResources(effRes, params.WorkerResources), params.TensorParallelSize, cpuProfile, common.ComponentLlmEngine+".parameters.workerResources"); err != nil {
 			return err
 		}
 	}
@@ -189,7 +205,7 @@ func validateLLM(c *controller.Context) error {
 		return err
 	}
 	if topo.PrefillWorkerCount != nil {
-		if err := validateTensorGPU(overlayResources(comp.Resources, topo.PrefillWorkerResources), params.TensorParallelSize, cpuProfile, "topology.parameters.prefillWorkerResources"); err != nil {
+		if err := validateTensorGPU(overlayResources(effRes, topo.PrefillWorkerResources), params.TensorParallelSize, cpuProfile, "topology.parameters.prefillWorkerResources"); err != nil {
 			return err
 		}
 	}
@@ -267,6 +283,38 @@ func validateWorkerGroup(count, pipeline *int32, resourcesSet bool, countField, 
 	return nil
 }
 
+// withGPUCount returns res with the nvidia.com/gpu limit derived from gpuCount
+// for the GPU profile. gpuCount is the number of GPUs each vLLM pod (head and
+// every worker) requests; the bundled presets set no GPU limit, so without this
+// the pod is scheduled with no GPU and vLLM cannot find a device. An explicit
+// gpuCount wins; otherwise an existing GPU limit is preserved and the GPU
+// profile defaults to 1. The CPU profile is left untouched.
+func withGPUCount(res *corev1.ResourceRequirements, gpuCount *int32, cpuProfile bool) *corev1.ResourceRequirements {
+	if cpuProfile {
+		return res
+	}
+	out := &corev1.ResourceRequirements{}
+	if res != nil {
+		out = res.DeepCopy()
+	}
+	if out.Limits == nil {
+		out.Limits = corev1.ResourceList{}
+	}
+	switch {
+	case gpuCount != nil:
+		count := int64(*gpuCount)
+		if count < 1 {
+			count = 1
+		}
+		out.Limits[nvidiaGPUResource] = *resource.NewQuantity(count, resource.DecimalSI)
+	default:
+		if _, ok := out.Limits[nvidiaGPUResource]; !ok {
+			out.Limits[nvidiaGPUResource] = *resource.NewQuantity(1, resource.DecimalSI)
+		}
+	}
+	return out
+}
+
 func validateTensorGPU(res *corev1.ResourceRequirements, tp *int32, cpuProfile bool, path string) error {
 	if cpuProfile || tp == nil || *tp < 1 || res == nil {
 		return nil
@@ -309,12 +357,26 @@ func overlayResources(head, overlay *corev1.ResourceRequirements) *corev1.Resour
 	return out
 }
 
-func buildWorkerPodSpec(res *corev1.ResourceRequirements) *corev1.PodSpec {
+func buildWorkerPodSpec(res *corev1.ResourceRequirements, gpu bool) *corev1.PodSpec {
 	c := corev1.Container{Name: "main"}
 	if res != nil {
 		c.Resources = *res
 	}
+	if gpu {
+		c.Env = append(c.Env, gpuLibraryPathEnv())
+	}
 	return &corev1.PodSpec{Containers: []corev1.Container{c}}
+}
+
+// gpuLibraryPathEnv returns the LIBRARY_PATH env var that makes libcuda.so.1
+// discoverable to the compile-time linker (gcc/ld) that vLLM's Triton and
+// Inductor JIT steps invoke on GPU nodes. The NVIDIA GPU Operator injects the
+// driver into the Debian multiarch dir, which the CUDA runtime image's ld does
+// not search by default, so without it GPU models crash at engine warm-up with
+// "cannot find -l:libcuda.so.1". gcc honors LIBRARY_PATH for -l link-time
+// lookups (the compile-time analog of LD_LIBRARY_PATH).
+func gpuLibraryPathEnv() corev1.EnvVar {
+	return corev1.EnvVar{Name: gpuLibraryPathEnvVar, Value: gpuLibraryPathValue}
 }
 
 func buildScalingSpec(s workloadScaling) *kservev1alpha2.ScalingSpec {
@@ -603,8 +665,11 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		spec.Parallelism = p
 	}
 
+	isCPUProfile := strings.EqualFold(params.ComputeProfile, computeProfileCPU)
+	effRes := withGPUCount(comp.Resources, params.GpuCount, isCPUProfile)
+
 	if params.WorkerCount != nil {
-		spec.Worker = buildWorkerPodSpec(overlayResources(comp.Resources, params.WorkerResources))
+		spec.Worker = buildWorkerPodSpec(overlayResources(effRes, params.WorkerResources), !isCPUProfile)
 	}
 
 	// Optional pod resource requirements from the component spec. KServe
@@ -612,9 +677,8 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 	// here wins over the preset and any baseRefs.
 	mainContainer := corev1.Container{Name: "main"}
 	haveMainOverride := false
-	isCPUProfile := strings.EqualFold(params.ComputeProfile, computeProfileCPU)
-	if comp.Resources != nil {
-		res := *comp.Resources
+	if effRes != nil {
+		res := *effRes
 		// For the CPU profile, mirror limits into requests (Guaranteed QoS).
 		if isCPUProfile {
 			res = mirrorLimitsToRequests(res)
@@ -631,6 +695,14 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 			kv = 1
 		}
 		mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{Name: cpuKVCacheEnvVar, Value: strconv.Itoa(kv)})
+		haveMainOverride = true
+	}
+
+	// GPU profile: put the NVIDIA driver lib dir on the compile-time linker path
+	// so vLLM's Triton/Inductor JIT steps can link libcuda.so.1 (see
+	// gpuLibraryPathEnv). Without it every GPU model crashes at engine warm-up.
+	if !isCPUProfile {
+		mainContainer.Env = append(mainContainer.Env, gpuLibraryPathEnv())
 		haveMainOverride = true
 	}
 
@@ -685,17 +757,27 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 				Pipeline: topo.PrefillPipelineParallelSize,
 			}
 		}
-		if comp.Resources != nil {
-			res := *comp.Resources
+		prefillMain := corev1.Container{Name: "main"}
+		havePrefillMain := false
+		if effRes != nil {
+			res := *effRes
 			if isCPUProfile {
 				res = mirrorLimitsToRequests(res)
 			}
+			prefillMain.Resources = res
+			havePrefillMain = true
+		}
+		if !isCPUProfile {
+			prefillMain.Env = append(prefillMain.Env, gpuLibraryPathEnv())
+			havePrefillMain = true
+		}
+		if havePrefillMain {
 			prefill.Template = &corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "main", Resources: res}},
+				Containers: []corev1.Container{prefillMain},
 			}
 		}
 		if topo.PrefillWorkerCount != nil {
-			prefill.Worker = buildWorkerPodSpec(overlayResources(comp.Resources, topo.PrefillWorkerResources))
+			prefill.Worker = buildWorkerPodSpec(overlayResources(effRes, topo.PrefillWorkerResources), !isCPUProfile)
 		}
 		spec.Prefill = prefill
 	}

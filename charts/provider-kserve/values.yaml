@@ -139,9 +139,12 @@ presets:
             modelName: smollm2-135m-instruct
             computeProfile: cpu
 
-  # llm-gpu — a mid-size, ungated model on a single GPU. A sensible "not huge"
-  # default that actually benefits from GPU acceleration (fits on one 24 GB
-  # card) yet needs no HuggingFace token or access approval.
+  # llm-gpu — a small, ungated model on a single GPU. Qwen3-4B (~8 GB in bf16)
+  # fits comfortably on one 16–24 GB card, needs no HuggingFace token, and starts
+  # quickly. CPU/memory are host-side only: the weights and KV cache live in VRAM,
+  # so the host just runs the Python/CUDA process and stages the model during
+  # load. They are set as requests (burstable) — the nvidia.com/gpu limit is the
+  # real gate, so there is no need for a large RAM limit here.
   - name: llm-gpu
     enabled: true
     spec:
@@ -153,18 +156,19 @@ presets:
         llmEngine:
           type: vllm
           replicas: 1
+          # GPU count is set via parameters.gpuCount below (the provider injects
+          # the nvidia.com/gpu limit); cpu/memory are host-side requests only.
           resources:
             requests:
               cpu: "2"
-              memory: 12Gi
-            limits:
-              nvidia.com/gpu: "1"
+              memory: 6Gi
           service:
             serviceType: ClusterIP
           parameters:
-            modelURI: hf://Qwen/Qwen3-8B
-            modelName: qwen3-8b
+            modelURI: hf://Qwen/Qwen3-4B
+            modelName: qwen3-4b
             computeProfile: gpu
+            gpuCount: 1
             tensorParallelSize: 1
 
 # ---------------------------------------------------------------------------
