@@ -209,6 +209,25 @@ ui:
               value: gpu
             - label: CPU
               value: cpu
+        gpuCount:
+          uiType: number
+          # GPU profile only. Written as a plain parameter (not resources.limits)
+          # because the "nvidia.com/gpu" resource key cannot be expressed as a
+          # dot-delimited path; the provider injects it into the model container's
+          # resource limits (head and every worker). Leave empty for CPU.
+          path: spec.components.llmEngine.parameters.gpuCount
+          fieldParams:
+            label: GPUs per pod
+            defaultValue: 1
+            helperText: >-
+              Number of GPUs (nvidia.com/gpu) each model pod requests. GPU
+              profile only — leave empty for CPU. Must be ≥ Tensor parallel size.
+          validation:
+            min: 1
+            max: 16
+            celExpressions:
+            - celExpr: '!has(spec.components.llmEngine.parameters.gpuCount) || spec.components.llmEngine.parameters.computeProfile != "cpu"'
+              message: GPUs per pod is only valid for the GPU compute profile
         resources:
           uiType: group
           groupType: line
@@ -256,6 +275,7 @@ ui:
             min: 1
       componentsOrder:
       - computeProfile
+      - gpuCount
       - resources
       - kvCacheSpaceGi
     routing:

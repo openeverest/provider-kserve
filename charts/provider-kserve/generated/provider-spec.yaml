@@ -32,6 +32,9 @@ spec:
               type: boolean
             expertParallel:
               type: string
+            gpuCount:
+              format: int32
+              type: integer
             kvCacheSpaceGi:
               format: int32
               type: integer
@@ -551,6 +554,19 @@ spec:
                     value: cpu
               path: spec.components.llmEngine.parameters.computeProfile
               uiType: select
+            gpuCount:
+              fieldParams:
+                defaultValue: 1
+                helperText: Number of GPUs (nvidia.com/gpu) each model pod requests. GPU profile only — leave empty for CPU. Must be ≥ Tensor parallel size.
+                label: GPUs per pod
+              path: spec.components.llmEngine.parameters.gpuCount
+              uiType: number
+              validation:
+                celExpressions:
+                  - celExpr: '!has(spec.components.llmEngine.parameters.gpuCount) || spec.components.llmEngine.parameters.computeProfile != "cpu"'
+                    message: GPUs per pod is only valid for the GPU compute profile
+                max: 16
+                min: 1
             kvCacheSpaceGi:
               fieldParams:
                 badge: Gi
@@ -588,6 +604,7 @@ spec:
               uiType: group
           componentsOrder:
             - computeProfile
+            - gpuCount
             - resources
             - kvCacheSpaceGi
           description: Choose the compute profile and size the model server. GPU uses the default CUDA vLLM image; CPU composes a CPU-only vLLM config (via baseRefs) so the model runs without a GPU. CPU/Memory are applied to the model server container per instance.
