@@ -22,3 +22,12 @@ spec:
         storageURI: gs://kfserving-examples/models/sklearn/1.0/model
         minReplicas: 1
         maxReplicas: 3
+        serviceAccountName: predictor-sa
+        labels:
+          cost-center: ml
+        annotations:
+          azure.workload.identity/use: "true"
+        securityContext:
+          runAsNonRoot: true
+        containerSecurityContext:
+          allowPrivilegeEscalation: false
