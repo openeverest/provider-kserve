@@ -96,7 +96,7 @@ func RateLimitRedisURL() string {
 }
 
 // PodMonitorEnabled reports whether the provider emits a Prometheus Operator
-// PodMonitor per llm Instance. Off by default so clusters without the
+// PodMonitor per Instance. Off by default so clusters without the
 // monitoring.coreos.com CRDs are never touched.
 func PodMonitorEnabled() bool {
 	return os.Getenv(podMonitorEnabledEnvVar) == "true"

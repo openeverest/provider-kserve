@@ -9,7 +9,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
-	"github.com/openeverest/provider-kserve/definition/topologies/llm"
 
 	"github.com/openeverest/provider-kserve/internal/common"
 )
@@ -17,18 +16,18 @@ import (
 const podMonitorSuffix = "-metrics"
 
 var podMonitorGVK = schema.GroupVersionKind{
-	Group: "monitoring.coreos.com", 
-	Version: "v1", 
-	Kind: "PodMonitor",
+	Group:   "monitoring.coreos.com",
+	Version: "v1",
+	Kind:    "PodMonitor",
 }
 
 // buildPodMonitor builds a Prometheus Operator PodMonitor that scrapes the pods
 // matched by selector on targetPort/path.
 //
-// This serves the per-Instance workload layers: the vLLM model pods today, and
-// the predictor (InferenceService) pods later — both are created per Instance by
-// this reconcile, so a new layer is just a different selector/port/path here, not
-// new plumbing. Singleton infrastructure does NOT belong here: the Envoy AI
+// This serves the per-Instance workload layers: vLLM (llm) and predictor
+// (InferenceService) pods — both are created per Instance by this reconcile,
+// so a new layer is just a different selector/port/path here, not new
+// plumbing. Singleton infrastructure does NOT belong here: the Envoy AI
 // Gateway is installed once by the chart (not per Instance) and exposes its
 // gen_ai.* metrics on a differently-named port (aigw-admin), so its PodMonitor
 // lives in the chart template that installs the gateway
@@ -70,26 +69,26 @@ func buildPodMonitor(
 	return pm
 }
 
-// syncPodMonitor creates or removes the per-Instance vLLM PodMonitor based on
-// the chart-level and instance-level enable flags.
+// syncPodMonitor creates or removes the per-Instance PodMonitor based on the
+// chart-level flag and the instance-level enable flag.
 //
 // A target cluster may not have the Prometheus Operator (monitoring.coreos.com)
 // CRDs installed. applyPodMonitor treats that as a no-op rather than an error,
 // so enabling metrics never breaks a bare cluster; install the CRDs later and
 // the next reconcile will emit the PodMonitor.
-func syncPodMonitor(c *controller.Context, topo llm.LlmTopologyParameters) error {
-	if !common.PodMonitorEnabled() || !topo.MetricsEnabled() {
+func syncPodMonitor(c *controller.Context, enabled bool, selector map[string]string, port int) error {
+	if !common.PodMonitorEnabled() || !enabled {
 		return deletePodMonitor(c)
 	}
-	return applyPodMonitor(c)
+	return applyPodMonitor(c, selector, port)
 }
 
-func applyPodMonitor(c *controller.Context) error {
+func applyPodMonitor(c *controller.Context, selector map[string]string, port int) error {
 	pm := buildPodMonitor(
 		c.Name(),
 		c.Instance().Namespace,
-		workloadPodSelector(c.Name()),
-		vllmServingPort,
+		selector,
+		port,
 		"/metrics",
 		common.PodMonitorInterval(),
 	)

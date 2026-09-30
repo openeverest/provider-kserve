@@ -18,6 +18,7 @@
 # See github.com/openeverest/provider-sdk/blob/main/PROVIDER_DEVELOPMENT.md
 # for detailed guidance.
 config:
+  parametersSchema: PredictorTopologyParameters
   components:
     predictor:
       defaults:
@@ -74,6 +75,29 @@ ui:
           validation:
             min: 0
             max: 32
+    observability:
+      label: Observability
+      description: >-
+        Configure Prometheus metrics for this predictor (per-instance
+        PodMonitor). Requires Prometheus Operator in the cluster.
+      components:
+        enableMetrics:
+          uiType: select
+          path: spec.topology.parameters.enableMetrics
+          fieldParams:
+            label: Prometheus metrics
+            defaultValue: "true"
+            helperText: >-
+              Emits a PodMonitor for this instance's predictor /metrics
+              endpoint (port 8080). Requires Prometheus Operator in the cluster.
+            options:
+            - label: Enabled
+              value: "true"
+            - label: Disabled
+              value: "false"
+      componentsOrder:
+      - enableMetrics
   sectionsOrder:
   - basicInfo
   - scaling
+  - observability
