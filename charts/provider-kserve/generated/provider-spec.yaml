@@ -132,6 +132,8 @@ spec:
               type: string
             runtimeVersion:
               type: string
+            storageContainer:
+              type: string
             storageURI:
               type: string
           type: object

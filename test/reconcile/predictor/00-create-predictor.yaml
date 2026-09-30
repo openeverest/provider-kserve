@@ -22,3 +22,4 @@ spec:
         storageURI: gs://kfserving-examples/models/sklearn/1.0/model
         minReplicas: 1
         maxReplicas: 3
+        storageContainer: custom-s3-init

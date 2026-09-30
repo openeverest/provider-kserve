@@ -75,6 +75,9 @@ func buildInferenceService(c *controller.Context) (*kservev1beta1.InferenceServi
 	if params.MaxReplicas != nil {
 		predictor.MaxReplicas = *params.MaxReplicas
 	}
+	if params.StorageContainer != "" {
+		predictor.StorageContainerName = ptr.To(params.StorageContainer)
+	}
 
 	meta := c.ObjectMeta(c.Name())
 	if meta.Annotations == nil {
