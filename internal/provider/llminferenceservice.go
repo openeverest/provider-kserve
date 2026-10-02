@@ -124,6 +124,11 @@ func validateLLM(c *controller.Context) error {
 	if topo.UsesAIGateway() && !common.AIGatewayEnabled() {
 		return fmt.Errorf("externalAccess EnvoyAIGateway requires aiGateway.enabled in the provider chart")
 	}
+	if topo.UsesAIGateway() {
+		if err := validateAIGatewayAccess(c, servedModelName(c.Name(), params.ModelName)); err != nil {
+			return err
+		}
+	}
 	if topo.TokenLimitPerHour != nil {
 		if !topo.UsesAIGateway() {
 			return fmt.Errorf("tokenLimitPerHour requires External access = EnvoyAIGateway")
@@ -730,6 +735,17 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 	for _, name := range routingConfigRefs(topo) {
 		spec.BaseRefs = append(spec.BaseRefs, corev1.LocalObjectReference{Name: name})
 	}
+	// KServe only reports the InferencePool ready for Gateways reached through
+	// an HTTPRoute it knows, so reference the one the AI Gateway generates.
+	if topo.UsesAIGateway() {
+		spec.Router = &kservev1alpha2.RouterSpec{
+			Route: &kservev1alpha2.GatewayRoutesSpec{
+				HTTP: &kservev1alpha2.HTTPRouteSpec{
+					Refs: []corev1.LocalObjectReference{{Name: aiGatewayRouteName(c.Name())}},
+				},
+			},
+		}
+	}
 	for _, ref := range params.BaseRefs {
 		spec.BaseRefs = append(spec.BaseRefs, corev1.LocalObjectReference{Name: ref})
 	}
@@ -995,7 +1011,10 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 		// When the AI Gateway is enabled, connection details come from the
 		// Gateway's external address rather than the direct workload URL.
 		if topo.UsesAIGateway() {
-			details, waiting, err := aiGatewayConnectionDetails(c)
+			comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
+			var params components.VllmCustomSpec
+			c.TryDecodeComponentParameters(comp, &params)
+			details, waiting, err := aiGatewayConnectionDetails(c, servedModelName(c.Name(), params.ModelName))
 			if err != nil {
 				return controller.Status{}, err
 			}

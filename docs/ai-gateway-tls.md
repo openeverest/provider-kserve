@@ -30,7 +30,7 @@ The cloud request flow is:
 flowchart TD
     client["External Client<br/>curl $GATEWAY_URL/v1/..."]
     lb["LoadBalancer<br/>External IP<br/>:80 HTTP or :443 HTTPS"]
-    gateway["Envoy Gateway — single LoadBalancer<br/>provider-kserve-ai-gateway<br/><br/>Routes by x-ai-eg-model<br/>Token metering per model<br/>Per-user rate limiting with x-user-id"]
+    gateway["Envoy Gateway — single LoadBalancer<br/>provider-kserve-ai-gateway<br/><br/>Checks the API key<br/>Routes by x-ai-eg-model<br/>Allows each key only its model<br/>Token metering per model<br/>Per-key rate limiting"]
 
     routeA["AIGatewayRoute A<br/>model: smollm"]
     routeB["AIGatewayRoute B<br/>model: llama-8b"]
@@ -174,7 +174,7 @@ production request should validate without `-k`:
 ```sh
 curl https://llm.example.com/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -H 'x-user-id: user123' \
+  -H "Authorization: Bearer $API_KEY" \
   -d '{
     "model": "llama-3.1-8b-instruct",
     "messages": [{"role": "user", "content": "Hello"}]
@@ -184,6 +184,49 @@ curl https://llm.example.com/v1/chat/completions \
 For Route53, Cloud DNS, or Azure DNS, replace only the solver and its
 credentials. Prefer workload identity, IRSA, or managed identity over static
 cloud keys when the DNS provider supports it.
+
+## HTTP-01 certificates
+
+Without a wildcard, HTTP-01 is enough and needs no DNS credentials, so it also
+works with `nip.io`/`sslip.io` hostnames for tests. The Gateway's load balancer
+must be public and reachable on port 80. Enable cert-manager's Gateway API
+support (`config.enableGatewayAPI: true`; the Gateway API CRDs must exist when
+cert-manager starts) and let the chart add a port-80 listener that serves only
+ACME challenges. Model routes and API keys stay on the HTTPS listener.
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod-ai-gateway
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-ai-gateway-account
+    solvers:
+      - http01:
+          gatewayHTTPRoute:
+            parentRefs:
+              - name: provider-kserve-ai-gateway
+                namespace: <release-namespace>
+                kind: Gateway
+                sectionName: acme-http01
+```
+
+```yaml
+aiGateway:
+  enabled: true
+  tls:
+    enabled: true
+    hostname: 203-0-113-10.nip.io   # <load-balancer-ip-with-dashes>.nip.io
+    acmeHTTP01: true
+    issuerRef:
+      name: letsencrypt-prod-ai-gateway
+```
+
+With `nip.io`, install once without TLS to get the load balancer address, then
+set the hostname and upgrade; the address is kept.
 
 ## Local TLS testing
 
@@ -224,7 +267,7 @@ GATEWAY_IP=$(kubectl get gateway provider-kserve-ai-gateway \
 curl -k --resolve "llm.local:443:${GATEWAY_IP}" \
   https://llm.local/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -H 'x-user-id: local-test' \
+  -H "Authorization: Bearer $API_KEY" \
   -d '{
     "model": "smollm",
     "messages": [{"role": "user", "content": "Say hello"}]

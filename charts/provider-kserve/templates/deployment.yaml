@@ -67,8 +67,14 @@ spec:
               value: {{ include "provider-kserve.aiGatewayPort" . | quote }}
             - name: AI_GATEWAY_HOSTNAME
               value: {{ ternary .Values.aiGateway.tls.hostname "" .Values.aiGateway.tls.enabled | quote }}
+            - name: AI_GATEWAY_LISTENER_NAME
+              value: {{ include "provider-kserve.aiGatewayListenerName" . | quote }}
             - name: AI_GATEWAY_RATE_LIMIT_REDIS_URL
               value: {{ dig "rateLimit" "backend" "redis" "url" "" (index .Values "envoy-gateway").config.envoyGateway | quote }}
+            - name: AI_GATEWAY_AUTH_ENABLED
+              value: {{ .Values.aiGateway.auth.enabled | quote }}
+            - name: AI_GATEWAY_AUTH_ALLOW_INSECURE_HTTP
+              value: {{ .Values.aiGateway.auth.allowInsecureHTTP | quote }}
             - name: ENABLE_POD_MONITOR
               value: {{ .Values.metrics.podMonitor.enabled | quote }}
             - name: POD_MONITOR_INTERVAL

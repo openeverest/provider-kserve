@@ -38,7 +38,11 @@ const (
 	aiGatewaySchemeEnvVar    = "AI_GATEWAY_SCHEME"
 	aiGatewayPortEnvVar      = "AI_GATEWAY_PORT"
 	aiGatewayHostnameEnvVar  = "AI_GATEWAY_HOSTNAME"
+	aiGatewayListenerEnvVar  = "AI_GATEWAY_LISTENER_NAME"
 	rateLimitRedisURLEnvVar  = "AI_GATEWAY_RATE_LIMIT_REDIS_URL"
+
+	aiGatewayAuthEnabledEnvVar           = "AI_GATEWAY_AUTH_ENABLED"
+	aiGatewayAuthAllowInsecureHTTPEnvVar = "AI_GATEWAY_AUTH_ALLOW_INSECURE_HTTP"
 
 	podMonitorEnabledEnvVar  = "ENABLE_POD_MONITOR"
 	podMonitorIntervalEnvVar = "POD_MONITOR_INTERVAL"
@@ -90,9 +94,27 @@ func AIGatewayHostname() string {
 	return os.Getenv(aiGatewayHostnameEnvVar)
 }
 
+// AIGatewayListenerName returns the Gateway listener that serves model traffic.
+// Empty means routes and policies attach to every listener.
+func AIGatewayListenerName() string {
+	return os.Getenv(aiGatewayListenerEnvVar)
+}
+
 // RateLimitRedisURL returns the Redis-compatible global rate-limit backend.
 func RateLimitRedisURL() string {
 	return os.Getenv(rateLimitRedisURLEnvVar)
+}
+
+// AIGatewayAuthEnabled reports whether requests through the shared AI Gateway
+// require an API key.
+func AIGatewayAuthEnabled() bool {
+	return AIGatewayEnabled() && os.Getenv(aiGatewayAuthEnabledEnvVar) == "true"
+}
+
+// AIGatewayAuthAllowInsecureHTTP reports whether API keys may be sent over a
+// plain HTTP listener (local development only).
+func AIGatewayAuthAllowInsecureHTTP() bool {
+	return os.Getenv(aiGatewayAuthAllowInsecureHTTPEnvVar) == "true"
 }
 
 // PodMonitorEnabled reports whether the provider emits a Prometheus Operator

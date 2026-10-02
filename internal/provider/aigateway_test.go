@@ -6,8 +6,25 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
+	"github.com/openeverest/provider-kserve/definition/components"
 	"github.com/openeverest/provider-kserve/definition/topologies/llm"
 )
+
+func TestAIGatewayInstanceReferencesGeneratedRoute(t *testing.T) {
+	got, err := buildLLMInferenceService(llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{
+		ExternalAccess: llm.ExternalAccessEnvoyAIGateway,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.Router == nil || got.Spec.Router.Route == nil || got.Spec.Router.Route.HTTP == nil ||
+		len(got.Spec.Router.Route.HTTP.Refs) != 1 || got.Spec.Router.Route.HTTP.Refs[0].Name != "llama-ai-gateway" {
+		t.Fatalf("router = %#v, want a ref to the llama-ai-gateway HTTPRoute", got.Spec.Router)
+	}
+	if got.Spec.Router.Gateway != nil || got.Spec.Router.Route.HTTP.Spec != nil {
+		t.Fatalf("router = %#v, want no managed gateway or route spec", got.Spec.Router)
+	}
+}
 
 func TestServedModelName(t *testing.T) {
 	t.Parallel()
@@ -164,6 +181,31 @@ func TestBuildTokenRateLimitPolicy(t *testing.T) {
 	}
 }
 
+func TestTokenRateLimitBucketsByKeyWhenAuthEnabled(t *testing.T) {
+	tests := []struct {
+		name        string
+		authEnabled string
+		wantHeader  string
+	}{
+		{name: "auth enabled", authEnabled: "true", wantHeader: aiGatewayKeyIDHeader},
+		{name: "auth disabled", authEnabled: "false", wantHeader: legacyUserIDHeader},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AI_GATEWAY_ENABLED", "true")
+			t.Setenv("AI_GATEWAY_AUTH_ENABLED", tt.authEnabled)
+
+			policy := buildTokenRateLimitPolicy("chat", "models", "llama", nil)
+			rules, _, _ := unstructured.NestedSlice(policy.Object, "spec", "rateLimit", "global", "rules")
+			selectors := rules[0].(map[string]any)["clientSelectors"].([]any)
+			headers := selectors[0].(map[string]any)["headers"].([]any)
+			if got := headers[0].(map[string]any)["name"]; got != tt.wantHeader {
+				t.Fatalf("quota bucket header = %v, want %s", got, tt.wantHeader)
+			}
+		})
+	}
+}
+
 func TestGatewayConnectionDetails(t *testing.T) {
 	t.Setenv("AI_GATEWAY_SCHEME", "https")
 	t.Setenv("AI_GATEWAY_PORT", "8443")
@@ -173,8 +215,8 @@ func TestGatewayConnectionDetails(t *testing.T) {
 	if details.Host != "llm.example.com" || details.Port != "8443" {
 		t.Fatalf("connection address = %s:%s", details.Host, details.Port)
 	}
-	if details.URI != "https://llm.example.com:8443" {
-		t.Fatalf("connection URI = %q, want https://llm.example.com:8443", details.URI)
+	if details.URI != "https://llm.example.com:8443/v1" {
+		t.Fatalf("connection URI = %q, want https://llm.example.com:8443/v1", details.URI)
 	}
 }
 
@@ -184,7 +226,7 @@ func TestGatewayConnectionDetailsUsesGatewayAddressWithoutConfiguredHostname(t *
 	t.Setenv("AI_GATEWAY_HOSTNAME", "")
 
 	details := gatewayConnectionDetails("gateway.example.com")
-	if details.Host != "gateway.example.com" || details.URI != "http://gateway.example.com" {
+	if details.Host != "gateway.example.com" || details.URI != "http://gateway.example.com/v1" {
 		t.Fatalf("connection details = %#v", details)
 	}
 }

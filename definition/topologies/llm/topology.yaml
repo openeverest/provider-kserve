@@ -283,7 +283,8 @@ ui:
       description: >-
         Configure how clients reach the model. Pick one external access path:
         a per-instance Service (ClusterIP / LoadBalancer / NodePort), or the
-        shared Envoy AI Gateway (token metering and optional per-user quotas).
+        shared Envoy AI Gateway (API key per model, token metering and optional
+        per-key quotas).
       components:
         externalAccess:
           uiType: select

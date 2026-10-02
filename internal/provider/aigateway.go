@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,16 @@ const (
 	defaultTokenLimitPerHour int32 = 1000
 	aiGatewayRouteSuffix           = "-ai-gateway"
 	inferencePoolSuffix            = "-inference-pool"
+
+	aiGatewayModelHeader = "x-ai-eg-model"
+	// aiGatewayKeyIDHeader carries the authenticated key ID; the Gateway strips
+	// any client-supplied value before authentication.
+	aiGatewayKeyIDHeader = "x-openeverest-key-id"
+	// legacyUserIDHeader is the unauthenticated quota bucket used when API keys
+	// are disabled.
+	legacyUserIDHeader = "x-user-id"
+
+	openAIBasePath = "/v1"
 )
 
 var (
@@ -44,6 +55,14 @@ func syncAIGateway(c *controller.Context, modelName string, tokenLimit *int32) e
 	gatewayNamespace := common.AIGatewayNamespace()
 	if gatewayName == "" || gatewayNamespace == "" {
 		return fmt.Errorf("ai gateway is enabled for the instance but the provider gateway is not configured")
+	}
+
+	// The key must exist before the route so the model is never reachable
+	// without one; the Gateway denies routes that have no key rule yet.
+	if common.AIGatewayAuthEnabled() {
+		if err := ensureAIGatewayKey(c); err != nil {
+			return err
+		}
 	}
 
 	route := buildAIGatewayRoute(c.Name(), c.Instance().Namespace, modelName, gatewayName, gatewayNamespace)
@@ -69,12 +88,89 @@ func cleanupAIGateway(c *controller.Context) error {
 	return deleteAIGatewayObject(c, backendTrafficPolicyGVK, "-token-limit")
 }
 
+// validateAIGatewayAccess enforces the invariants API keys rely on: keys only
+// travel over HTTPS, and a model name maps to exactly one route because the
+// Gateway authorizes keys by model name.
+func validateAIGatewayAccess(c *controller.Context, modelName string) error {
+	if common.AIGatewayAuthEnabled() && common.AIGatewayScheme() != "https" && !common.AIGatewayAuthAllowInsecureHTTP() {
+		return fmt.Errorf("API keys for the Envoy AI Gateway require HTTPS: enable aiGateway.tls in the provider chart " +
+			"(or set aiGateway.auth.allowInsecureHTTP for local development)")
+	}
+
+	routes := &unstructured.UnstructuredList{}
+	routes.SetGroupVersionKind(aiGatewayRouteGVK.GroupVersion().WithKind(aiGatewayRouteGVK.Kind + "List"))
+	if err := c.Client().List(c.Context(), routes); err != nil {
+		return fmt.Errorf("listing ai gateway routes: %w", err)
+	}
+	ownRoute := aiGatewayRouteName(c.Name())
+	for i := range routes.Items {
+		route := &routes.Items[i]
+		if route.GetNamespace() == c.Namespace() && route.GetName() == ownRoute {
+			continue
+		}
+		if !routeAttachedToGateway(route, common.AIGatewayName(), common.AIGatewayNamespace()) {
+			continue
+		}
+		if slices.Contains(aiGatewayRouteModels(route), modelName) {
+			return fmt.Errorf("model name %q is already served through the Envoy AI Gateway by %s/%s; set a different %s.parameters.modelName",
+				modelName, route.GetNamespace(), route.GetName(), common.ComponentLlmEngine)
+		}
+	}
+	return nil
+}
+
 func deleteAIGatewayObject(c *controller.Context, gvk schema.GroupVersionKind, suffix string) error {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(gvk)
 	obj.SetName(knativekmeta.ChildName(c.Name(), suffix))
 	obj.SetNamespace(c.Instance().Namespace)
 	return c.Delete(obj)
+}
+
+func aiGatewayRouteName(instanceName string) string {
+	return knativekmeta.ChildName(instanceName, aiGatewayRouteSuffix)
+}
+
+// aiGatewayRouteModels returns the model names an AIGatewayRoute matches on.
+func aiGatewayRouteModels(route *unstructured.Unstructured) []string {
+	rules, _, _ := unstructured.NestedSlice(route.Object, "spec", "rules")
+	var models []string
+	for _, rawRule := range rules {
+		rule, _ := rawRule.(map[string]any)
+		matches, _, _ := unstructured.NestedSlice(rule, "matches")
+		for _, rawMatch := range matches {
+			match, _ := rawMatch.(map[string]any)
+			headers, _, _ := unstructured.NestedSlice(match, "headers")
+			for _, rawHeader := range headers {
+				header, _ := rawHeader.(map[string]any)
+				name, _ := header["name"].(string)
+				matchType, _ := header["type"].(string)
+				value, _ := header["value"].(string)
+				if strings.EqualFold(name, aiGatewayModelHeader) && (matchType == "" || matchType == "Exact") && value != "" {
+					models = append(models, value)
+				}
+			}
+		}
+	}
+	return models
+}
+
+// routeAttachedToGateway reports whether the route references the given Gateway.
+func routeAttachedToGateway(route *unstructured.Unstructured, gatewayName, gatewayNamespace string) bool {
+	parents, _, _ := unstructured.NestedSlice(route.Object, "spec", "parentRefs")
+	for _, rawParent := range parents {
+		parent, _ := rawParent.(map[string]any)
+		name, _ := parent["name"].(string)
+		namespace, _ := parent["namespace"].(string)
+		kind, _ := parent["kind"].(string)
+		if namespace == "" {
+			namespace = route.GetNamespace()
+		}
+		if name == gatewayName && namespace == gatewayNamespace && (kind == "" || kind == gatewayGVK.Kind) {
+			return true
+		}
+	}
+	return false
 }
 
 func buildAIGatewayRoute(
@@ -85,6 +181,15 @@ func buildAIGatewayRoute(
 	gatewayNamespace string,
 ) *unstructured.Unstructured {
 	name := knativekmeta.ChildName(instanceName, aiGatewayRouteSuffix)
+	parent := map[string]any{
+		"name":      gatewayName,
+		"namespace": gatewayNamespace,
+		"kind":      "Gateway",
+		"group":     gatewayGVK.Group,
+	}
+	if listener := common.AIGatewayListenerName(); listener != "" {
+		parent["sectionName"] = listener
+	}
 	route := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": aiGatewayRouteGVK.GroupVersion().String(),
 		"kind":       aiGatewayRouteGVK.Kind,
@@ -93,17 +198,12 @@ func buildAIGatewayRoute(
 			"namespace": namespace,
 		},
 		"spec": map[string]any{
-			"parentRefs": []any{map[string]any{
-				"name":      gatewayName,
-				"namespace": gatewayNamespace,
-				"kind":      "Gateway",
-				"group":     gatewayGVK.Group,
-			}},
+			"parentRefs": []any{parent},
 			"rules": []any{map[string]any{
 				"matches": []any{map[string]any{
 					"headers": []any{map[string]any{
 						"type":  "Exact",
-						"name":  "x-ai-eg-model",
+						"name":  aiGatewayModelHeader,
 						"value": modelName,
 					}},
 				}},
@@ -137,6 +237,10 @@ func buildTokenRateLimitPolicy(
 	}
 
 	name := knativekmeta.ChildName(instanceName, aiGatewayRouteSuffix)
+	quotaBucketHeader := legacyUserIDHeader
+	if common.AIGatewayAuthEnabled() {
+		quotaBucketHeader = aiGatewayKeyIDHeader
+	}
 	policy := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": backendTrafficPolicyGVK.GroupVersion().String(),
 		"kind":       backendTrafficPolicyGVK.Kind,
@@ -154,9 +258,9 @@ func buildTokenRateLimitPolicy(
 					"rules": []any{map[string]any{
 						"clientSelectors": []any{map[string]any{
 							"headers": []any{
-								map[string]any{"name": "x-user-id", "type": "Distinct"},
+								map[string]any{"name": quotaBucketHeader, "type": "Distinct"},
 								map[string]any{
-									"name": "x-ai-eg-model", "type": "Exact", "value": modelName,
+									"name": aiGatewayModelHeader, "type": "Exact", "value": modelName,
 								},
 							},
 						}},
@@ -183,10 +287,10 @@ func buildTokenRateLimitPolicy(
 	return policy
 }
 
-func aiGatewayConnectionDetails(c *controller.Context) (controller.ConnectionDetails, string, error) {
+func aiGatewayConnectionDetails(c *controller.Context, modelName string) (controller.ConnectionDetails, string, error) {
 	route := &unstructured.Unstructured{}
 	route.SetGroupVersionKind(aiGatewayRouteGVK)
-	routeName := knativekmeta.ChildName(c.Name(), aiGatewayRouteSuffix)
+	routeName := aiGatewayRouteName(c.Name())
 	if err := c.Client().Get(
 		c.Context(),
 		types.NamespacedName{Name: routeName, Namespace: c.Instance().Namespace},
@@ -225,7 +329,20 @@ func aiGatewayConnectionDetails(c *controller.Context) (controller.ConnectionDet
 		return controller.ConnectionDetails{}, "Waiting for Envoy AI Gateway address", nil
 	}
 
-	return gatewayConnectionDetails(address), "", nil
+	details := gatewayConnectionDetails(address)
+	details.AdditionalProperties = map[string]string{"model": modelName}
+	if common.AIGatewayAuthEnabled() {
+		keyID, key, err := readAIGatewayKey(c)
+		if err != nil {
+			return controller.ConnectionDetails{}, "", fmt.Errorf("reading ai gateway api key: %w", err)
+		}
+		if key == "" {
+			return controller.ConnectionDetails{}, "Waiting for Envoy AI Gateway API key", nil
+		}
+		details.Username = keyID
+		details.Password = key
+	}
+	return details, "", nil
 }
 
 func routeAcceptance(route *unstructured.Unstructured) (bool, string) {
@@ -279,7 +396,7 @@ func gatewayConnectionDetails(address string) controller.ConnectionDetails {
 		Provider: common.ProviderName,
 		Host:     host,
 		Port:     port,
-		URI:      (&url.URL{Scheme: scheme, Host: uriHost}).String(),
+		URI:      (&url.URL{Scheme: scheme, Host: uriHost, Path: openAIBasePath}).String(),
 	}
 }
 

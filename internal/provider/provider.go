@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
 	kservev1beta1 "github.com/kserve/kserve/pkg/apis/serving/v1beta1"
@@ -33,7 +34,11 @@ func New() *Provider {
 		controller.WatchOwned(&corev1.Service{}),
 	}
 	if common.AIGatewayEnabled() {
-		watches = append(watches, controller.WatchOwned(unstructuredObject(aiGatewayRouteGVK)))
+		watches = append(watches,
+			controller.WatchOwned(unstructuredObject(aiGatewayRouteGVK)),
+			// Regenerates a deleted API key Secret promptly (key rotation).
+			controller.WatchOwned(&corev1.Secret{}, predicate.NewPredicateFuncs(isAIGatewayKeySecret)),
+		)
 	}
 	// Note: the PodMonitor is intentionally NOT watched. Owning a watch on
 	// monitoring.coreos.com/PodMonitor would fail the manager at startup on any
@@ -116,7 +121,10 @@ func (p *Provider) Cleanup(c *controller.Context) error {
 		}
 		// The inline Advanced config is owner-ref garbage-collected; delete it
 		// explicitly too (no-op when absent).
-		return c.Delete(&kservev1alpha2.LLMInferenceServiceConfig{ObjectMeta: c.ObjectMeta(instanceConfigName(c.Name()))})
+		if err := c.Delete(&kservev1alpha2.LLMInferenceServiceConfig{ObjectMeta: c.ObjectMeta(instanceConfigName(c.Name()))}); err != nil {
+			return err
+		}
+		return c.Delete(&corev1.Secret{ObjectMeta: c.ObjectMeta(aiGatewayKeySecretName(c.Name()))})
 	case common.TopologyPredictor:
 		return c.Delete(&kservev1beta1.InferenceService{ObjectMeta: c.ObjectMeta(c.Name())})
 	default:

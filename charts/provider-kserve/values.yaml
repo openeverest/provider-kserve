@@ -451,6 +451,9 @@ aiGateway:
     hostname: ""
     # -- Secret populated by cert-manager; empty uses <gateway-name>-tls
     secretName: ""
+    # -- Add a port-80 listener that only serves cert-manager HTTP-01
+    # challenges (Gateway API solver). Model traffic stays on HTTPS.
+    acmeHTTP01: false
     # -- Existing cert-manager Issuer or ClusterIssuer
     issuerRef:
       name: ""
@@ -459,6 +462,12 @@ aiGateway:
   gatewayService:
     # -- Envoy proxy Service type (LoadBalancer, NodePort, or ClusterIP)
     type: LoadBalancer
+  auth:
+    # -- Require an API key on every request through the shared Gateway. Each
+    # llm Instance gets a generated key in its connection details (password).
+    enabled: true
+    # -- Allow API keys over a plain HTTP listener (local development only)
+    allowInsecureHTTP: false
 
 # Envoy Gateway subchart configuration required by Envoy AI Gateway v0.4.
 envoy-gateway:
@@ -493,7 +502,7 @@ envoy-gateway:
           fqdn:
             hostname: ai-gateway-controller
             port: 1063
-      # To enable per-user token quotas, add an existing Redis/Valkey endpoint:
+      # To enable per-key token quotas, add an existing Redis/Valkey endpoint:
       # rateLimit:
       #   backend:
       #     type: Redis
@@ -506,6 +515,9 @@ envoy-gateway:
 envoy-ai-gateway:
   envoyGateway:
     namespace: default
+  controller:
+    # Labels GenAI metrics with the authenticated API key ID.
+    metricsRequestHeaderAttributes: "x-openeverest-key-id:openeverest.key.id"
 
 envoy-ai-gateway-crds: {}
 
