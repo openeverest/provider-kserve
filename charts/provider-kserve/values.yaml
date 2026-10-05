@@ -327,13 +327,12 @@ leaderElection:
 # ---------------------------------------------------------------------------
 
 # -- cert-manager provides the webhook certificates the KServe controllers
-# require. Both controllers run admission webhooks whose certificates are
-# issued by cert-manager, so it must be present. Set `enabled: false` when the
-# cluster already runs cert-manager (common) — the KServe controllers will then
-# use the existing installation.
+# require, so it must be present. Off by default: most clusters already run it,
+# and installing it in the same release races its CRDs and webhook against the
+# KServe `Issuer` / `Certificate`. Install it first (see README).
 cert-manager:
   # -- Install cert-manager as part of this release
-  enabled: true
+  enabled: false
   # -- Install the cert-manager CRDs (required unless already present)
   crds:
     enabled: true
@@ -430,12 +429,15 @@ cpuProfile:
 # ---------------------------------------------------------------------------
 # Optional Envoy AI Gateway.
 #
-# When enabled, the chart installs compatible Envoy Gateway and Envoy AI
-# Gateway controllers and creates one shared Gateway. Individual llm Instances
-# opt in with `spec.topology.parameters.enableAIGateway: true`.
+# `aiGateway.enabled` creates one shared Gateway and turns on the feature in
+# the provider. It does not install controllers: either set
+# `envoy-gateway.enabled` / `envoy-ai-gateway.enabled` below, or bring your own
+# Envoy Gateway (v1.5+, with the extension-manager config below) and Envoy AI
+# Gateway. Individual llm Instances opt in with
+# `spec.topology.parameters.externalAccess: EnvoyAIGateway`.
 # TLS is chart-level (`aiGateway.tls`), not an Instance form field.
 aiGateway:
-  # -- Install and configure the shared Envoy AI Gateway stack
+  # -- Create the shared Gateway and enable the AI Gateway access path
   enabled: false
   # -- Scheme published in Instance connection details
   scheme: http
@@ -449,12 +451,14 @@ aiGateway:
     enabled: false
     # -- DNS name clients use for the Gateway, for example llm.example.com
     hostname: ""
-    # -- Secret populated by cert-manager; empty uses <gateway-name>-tls
+    # -- Secret populated by cert-manager (also the Certificate name); empty uses <gateway-name>-tls
     secretName: ""
     # -- Add a port-80 listener that only serves cert-manager HTTP-01
     # challenges (Gateway API solver). Model traffic stays on HTTPS.
     acmeHTTP01: false
-    # -- Existing cert-manager Issuer or ClusterIssuer
+    # -- Existing cert-manager Issuer or ClusterIssuer. cert-manager must run
+    # with Gateway API support (`config.enableGatewayAPI: true`); it creates
+    # the Certificate from the Gateway's annotations.
     issuerRef:
       name: ""
       kind: ClusterIssuer
@@ -469,8 +473,12 @@ aiGateway:
     # -- Allow API keys over a plain HTTP listener (local development only)
     allowInsecureHTTP: false
 
-# Envoy Gateway subchart configuration required by Envoy AI Gateway v0.4.
+# Envoy Gateway subchart. Off by default: a second Envoy Gateway with the same
+# controllerName would fight an existing one over every Gateway. When you bring
+# your own, apply the same `config.envoyGateway` (extension manager) to it.
 envoy-gateway:
+  # -- Install Envoy Gateway into the release namespace
+  enabled: false
   config:
     envoyGateway:
       gateway:
@@ -509,12 +517,12 @@ envoy-gateway:
       #     redis:
       #       url: valkey.default.svc.cluster.local:6379
 
-# Both optional controllers are installed into the provider release namespace.
-# This upstream value is supplemented by a release-namespace binding rendered
-# by this chart.
+# Envoy AI Gateway controller and CRDs. Off by default; enable together with
+# `envoy-gateway.enabled` (the extension-manager hostname above assumes both
+# run in the release namespace).
 envoy-ai-gateway:
-  envoyGateway:
-    namespace: default
+  # -- Install the Envoy AI Gateway controller and CRDs into the release namespace
+  enabled: false
   controller:
     # Labels GenAI metrics with the authenticated API key ID.
     metricsRequestHeaderAttributes: "x-openeverest-key-id:openeverest.key.id"

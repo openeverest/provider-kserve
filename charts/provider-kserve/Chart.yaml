@@ -34,8 +34,7 @@ maintainers:
 # to vendor the dependencies into `charts/` and the CRDs into `crds/`.
 dependencies:
   # cert-manager issues the admission-webhook certificates the KServe
-  # controllers require. Installed by default; set `cert-manager.enabled=false`
-  # when the cluster already provides cert-manager (a common case).
+  # controllers require. Off by default; normally installed beforehand.
   - name: cert-manager
     version: "v1.16.2"
     repository: https://charts.jetstack.io
@@ -73,16 +72,16 @@ dependencies:
     alias: envoy-gateway
     version: "v1.5.9"
     repository: "oci://docker.io/envoyproxy"
-    condition: aiGateway.enabled
+    condition: envoy-gateway.enabled
   # Envoy AI Gateway installs its CRDs separately from its controller chart.
   - name: ai-gateway-crds-helm
     alias: envoy-ai-gateway-crds
     version: "v0.4.0"
     repository: "oci://docker.io/envoyproxy"
-    condition: aiGateway.enabled
+    condition: envoy-ai-gateway.enabled
   - name: ai-gateway-helm
     alias: envoy-ai-gateway
     version: "v0.4.0"
     repository: "oci://docker.io/envoyproxy"
-    condition: aiGateway.enabled
+    condition: envoy-ai-gateway.enabled
 

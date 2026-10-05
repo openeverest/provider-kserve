@@ -311,10 +311,10 @@ provider_flags = [
 if enable_ai_gateway:
     provider_flags = provider_flags + [
         '--set', 'aiGateway.enabled=true',
+        '--set', 'envoy-gateway.enabled=true',
+        '--set', 'envoy-ai-gateway.enabled=true',
         # The local gateway has no TLS; API keys are still required.
         '--set', 'aiGateway.auth.allowInsecureHTTP=true',
-        '--set', 'envoy-ai-gateway.envoyGateway.namespace={0}'.format(
-            provider_namespace),
     ]
 if enable_metrics:
     # Labeled ConfigMaps for kube-prometheus-stack Grafana sidecar (see
@@ -367,7 +367,7 @@ post_install_cmd = (
 ).format(ns=provider_namespace, chart=chart_dir)
 
 if enable_ai_gateway:
-    post_install_cmd = post_install_cmd + ' --set aiGateway.enabled=true --set aiGateway.auth.allowInsecureHTTP=true --set envoy-ai-gateway.envoyGateway.namespace={0}'.format(provider_namespace)
+    post_install_cmd = post_install_cmd + ' --set aiGateway.enabled=true --set envoy-gateway.enabled=true --set envoy-ai-gateway.enabled=true --set aiGateway.auth.allowInsecureHTTP=true'
 
 if enable_metrics:
     post_install_cmd = post_install_cmd + ' --set metrics.grafanaDashboards.enabled=true --set metrics.grafanaDashboards.namespace=monitoring'

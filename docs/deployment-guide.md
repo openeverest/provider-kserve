@@ -54,6 +54,12 @@ on that Gateway. Multi-tenancy is achieved through header-based routing
 (`x-ai-eg-model`), a generated API key per model (shown as the Instance
 connection password), and per-key token quotas.
 
+> [!NOTE]
+> `aiGateway.enabled=true` creates the shared Gateway but does not install the
+> controllers. The `helm install` examples below assume Envoy Gateway and Envoy
+> AI Gateway already run in the cluster; otherwise add
+> `--set envoy-gateway.enabled=true --set envoy-ai-gateway.enabled=true`.
+
 ---
 
 ## How the Gateway Gets Its Address

@@ -76,11 +76,11 @@ Models are pulled from the URI given in the component parameters (`hf://`, `s3:/
 
 > [!IMPORTANT]
 > **Prerequisites.** Besides an [OpenEverest](#what-this-is) installation, the KServe
-> controllers require **cert-manager** — they run admission webhooks whose certificates it
-> issues. The chart bundles cert-manager and installs it (with its CRDs) by default; when the
-> cluster already runs cert-manager, install with `--set cert-manager.enabled=false` to use the
-> existing one. Either way cert-manager **and its CRDs must be present** — unlike the KServe
-> CRDs, the chart does not vendor the cert-manager CRDs. See [KServe CRDs](#kserve-crds).
+> controllers require **cert-manager** (with its CRDs) — they run admission webhooks whose
+> certificates it issues. Install it before this chart. The chart can bundle it
+> (`cert-manager.enabled=true`), but that is off by default: most clusters already run
+> cert-manager, and a same-release install races its webhook against the KServe `Issuer` /
+> `Certificate`. See [KServe CRDs](#kserve-crds).
 
 Install the published chart from the GHCR OCI registry:
 
@@ -104,15 +104,14 @@ helm install provider-kserve charts/provider-kserve --namespace everest-system
 
 - The KServe controllers are bundled as chart dependencies and installed by default — see
   [Bundled KServe controllers](#bundled-kserve-controllers).
-- cert-manager is bundled too, because both KServe controllers run admission webhooks. Set
-  `cert-manager.enabled=false` when the cluster already provides it.
+- cert-manager, Envoy Gateway and Envoy AI Gateway can be bundled too, but are off by default
+  so the chart never installs a second copy next to an existing one.
 
 > [!NOTE]
-> Installing cert-manager in the *same* Helm release as the resources that consume it can
-> race — the cert-manager webhook may not be ready when the KServe `Issuer` / `Certificate`
-> objects are admitted. If a first install fails on a cert-manager webhook error, either
-> re-run it or install cert-manager first with `cert-manager.enabled=false`. The dev
-> [Tiltfile](dev/Tiltfile) does the latter automatically.
+> If you set `cert-manager.enabled=true`, the cert-manager webhook may not be ready when the
+> KServe `Issuer` / `Certificate` objects are admitted. If a first install fails on a
+> cert-manager webhook error, re-run it. The dev [Tiltfile](dev/Tiltfile) installs
+> cert-manager as its own release instead.
 
 Uninstall:
 
@@ -292,7 +291,8 @@ port-forward workflow. Envoy AI Gateway is an independent, opt-in access path th
 opted-in models one OpenAI-compatible entry point, per-model API keys, token metering, and
 optional per-key token quotas.
 
-Enable the bundled controllers and shared `LoadBalancer` Gateway:
+Enable the shared `LoadBalancer` Gateway, and the bundled controllers unless the cluster
+already runs Envoy Gateway / Envoy AI Gateway:
 
 ```yaml
 # values.yaml
@@ -303,7 +303,14 @@ aiGateway:
     hostname: llm.example.com
     issuerRef:
       name: letsencrypt-prod
+envoy-gateway:
+  enabled: true        # false when Envoy Gateway already runs (see below)
+envoy-ai-gateway:
+  enabled: true        # false when Envoy AI Gateway already runs
 ```
+
+When you bring your own Envoy Gateway (v1.5+), it must carry the AI Gateway extension-manager
+config from `envoy-gateway.config` in [values.yaml](charts/provider-kserve/values.yaml).
 
 API keys (`aiGateway.auth.enabled`, on by default) require HTTPS, so the chart refuses to render
 without `aiGateway.tls` unless `aiGateway.auth.allowInsecureHTTP=true` is set for local
@@ -600,7 +607,7 @@ reconcile them. The controllers that do are bundled as Helm subchart dependencie
 | `kserve-resources` | `InferenceService` (predictor) | `kserveResources.enabled` |
 | `kserve-llmisvc-resources` | `LLMInferenceService` (llm) | `kserveLlmisvcResources.enabled` |
 | `kserve-runtime-configs` | `ClusterServingRuntime`s (predictor) | `kserveRuntimeConfigs.enabled` |
-| `cert-manager` | webhook certificates for both | `cert-manager.enabled` |
+| `cert-manager` | webhook certificates for both | `cert-manager.enabled` (off by default) |
 
 The KServe CRDs are **not** subchart dependencies — they are vendored into the chart's
 `crds/` directory (see [KServe CRDs](#kserve-crds)).
@@ -756,7 +763,7 @@ kubectl logs -n everest-system deploy/provider-kserve -f
 | `unsupported topology ""` | `spec.topology.type` is required — set `llm` or `predictor` |
 | `ConfigNotFound: kserve-config-llm-template` | The LLM presets are missing; keep `llmPresets.enabled=true` |
 | `predictor` instance has no runtime | `kserve-runtime-configs` must be installed |
-| Install fails on a cert-manager webhook error | Re-run, or install cert-manager first with `cert-manager.enabled=false` |
+| Install fails on a cert-manager webhook error | Re-run, or install cert-manager as its own release first and keep `cert-manager.enabled=false` |
 | CPU model fails with "less than desired CPU memory utilization" | Raise the memory limit or lower `--gpu-memory-utilization` — see [CPU memory sizing](#cpu-memory-sizing) |
 | Gated model download fails | Create the `HF_TOKEN` secret and set `huggingface.tokenSecretName` |
 

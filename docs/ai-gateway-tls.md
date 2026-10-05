@@ -1,9 +1,14 @@
 # Envoy AI Gateway TLS
 
 For a public cloud endpoint, configure an existing cert-manager `Issuer` or
-`ClusterIssuer`. The provider chart creates the `Certificate`, stores it in a
-Secret in the release namespace, and exposes the shared Gateway over HTTPS on
-port 443.
+`ClusterIssuer`. The provider chart annotates the shared Gateway with the
+issuer and exposes it over HTTPS on port 443. cert-manager's Gateway API
+support then creates the `Certificate` (named after the TLS Secret,
+`provider-kserve-ai-gateway-tls` by default) in the release namespace.
+
+cert-manager must run with `config.enableGatewayAPI: true`, and the Gateway
+API CRDs must exist when it starts (see
+[ai-gateway-setup.md](ai-gateway-setup.md#2-cert-manager-with-gateway-api-support)).
 
 ```yaml
 aiGateway:
@@ -60,8 +65,8 @@ any Kubernetes provider.
 
 Prerequisites:
 
-1. cert-manager is running. This chart installs it by default; if the cluster
-   already has it, set `cert-manager.enabled=false`.
+1. cert-manager is running with Gateway API support enabled
+   (`config.enableGatewayAPI: true`).
 2. You control the hostname's DNS zone and can create a restricted DNS API
    credential.
 3. The hostname has an `A` or `AAAA` record, or a suitable `CNAME`, pointing to
@@ -124,10 +129,6 @@ kubectl wait clusterissuer/letsencrypt-staging \
 Configure the provider release:
 
 ```yaml
-cert-manager:
-  # Use false when cert-manager is already managed by the cluster.
-  enabled: false
-
 aiGateway:
   enabled: true
   gatewayService:
@@ -150,7 +151,7 @@ kubectl get gateway
 kubectl get service -A \
   -l gateway.envoyproxy.io/owning-gateway-name=provider-kserve-ai-gateway
 kubectl get certificate,certificaterequest,challenge
-kubectl wait certificate/provider-kserve-ai-gateway \
+kubectl wait certificate/provider-kserve-ai-gateway-tls \
   --for=condition=Ready --timeout=300s
 ```
 
@@ -189,10 +190,9 @@ cloud keys when the DNS provider supports it.
 
 Without a wildcard, HTTP-01 is enough and needs no DNS credentials, so it also
 works with `nip.io`/`sslip.io` hostnames for tests. The Gateway's load balancer
-must be public and reachable on port 80. Enable cert-manager's Gateway API
-support (`config.enableGatewayAPI: true`; the Gateway API CRDs must exist when
-cert-manager starts) and let the chart add a port-80 listener that serves only
-ACME challenges. Model routes and API keys stay on the HTTPS listener.
+must be public and reachable on port 80. Let the chart add a port-80 listener
+that serves only ACME challenges. Model routes and API keys stay on the HTTPS
+listener.
 
 ```yaml
 apiVersion: cert-manager.io/v1

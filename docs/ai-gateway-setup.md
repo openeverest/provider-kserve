@@ -42,9 +42,9 @@ In the commands below, `NS=provider-kserve` is the release namespace.
 
 ## 1. Gateway API CRDs
 
-cert-manager's Gateway API support refuses to start if the CRDs are missing, so
-install the exact set bundled with the Envoy Gateway version the chart pins
-(v1.5.9):
+cert-manager's Gateway API support (which issues the Gateway's TLS certificate)
+refuses to start if the CRDs are missing, so install the exact set bundled with
+the Envoy Gateway version the chart pins (v1.5.9):
 
 ```sh
 helm pull oci://docker.io/envoyproxy/gateway-helm --version v1.5.9 --untar -d /tmp/eg
@@ -95,16 +95,21 @@ Create a values file. The `aiGateway` section is completed in step 5.
 image:
   repository: <registry>/provider-kserve
   tag: <tag>
-cert-manager:
-  enabled: false          # installed in step 2
+envoy-gateway:
+  enabled: true           # false if Envoy Gateway already runs (see below)
 envoy-ai-gateway:
-  envoyGateway:
-    namespace: provider-kserve   # = release namespace
+  enabled: true           # false if Envoy AI Gateway already runs
 aiGateway:
   enabled: true
   gatewayService:
     type: LoadBalancer
 ```
+
+cert-manager stays off (`cert-manager.enabled=false` is the default) because
+it was installed in step 2. If the cluster already runs Envoy Gateway (v1.5+),
+leave `envoy-gateway.enabled` off and apply the `envoy-gateway.config`
+extension-manager settings from the chart's `values.yaml` to it instead;
+running two Envoy Gateways makes them fight over the same Gateways.
 
 The KServe webhooks must be running before the chart can create the resources
 they validate, so install in three passes (the same order the Tilt setup uses):
@@ -189,7 +194,7 @@ API keys are only accepted over HTTPS. The chart refuses to render with
 
    ```sh
    helm upgrade provider-kserve $CHART -n $NS -f values.yaml
-   kubectl -n $NS wait certificate/provider-kserve-ai-gateway --for=condition=Ready --timeout=10m
+   kubectl -n $NS wait certificate/provider-kserve-ai-gateway-tls --for=condition=Ready --timeout=10m
    curl -s -o /dev/null -w '%{http_code}\n' https://llm.example.com/v1/models   # 401 without a key
    ```
 
