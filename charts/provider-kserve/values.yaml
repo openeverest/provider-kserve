@@ -101,7 +101,7 @@ provider:
   # -- The name to register for the Provider custom resource
   name: provider-kserve
   # -- Short identifier for the provider, used in resource names
-  # This appears in preset names (e.g., '<shortName>-llm-cpu') and can be
+  # This appears in preset names (e.g., '<shortName>-smollm-cpu') and can be
   # used in other contexts where a short concise provider identifier is needed.
   shortName: kserve
 
@@ -110,10 +110,10 @@ provider:
 # The 'spec' field contains the full InstancePresetSpec.
 # Note: The provider shortName will be automatically added to each preset name.
 presets:
-  # llm-cpu — a tiny, ungated model on CPU-only nodes. Sized for local
+  # smollm-cpu — a tiny, ungated model on CPU-only nodes. Sized for local
   # development and smoke tests (k3d/kind/minikube): no GPU required, and the
   # smallest instruct model in the catalog so it downloads and starts fast.
-  - name: llm-cpu
+  - name: smollm-cpu
     enabled: true
     spec:
       providerRef:
@@ -139,13 +139,13 @@ presets:
             modelName: smollm2-135m-instruct
             computeProfile: cpu
 
-  # llm-gpu — a small, ungated model on a single GPU. Qwen3-4B (~8 GB in bf16)
+  # qwen-gpu — a small, ungated model on a single GPU. Qwen3-4B (~8 GB in bf16)
   # fits comfortably on one 16–24 GB card, needs no HuggingFace token, and starts
   # quickly. CPU/memory are host-side only: the weights and KV cache live in VRAM,
   # so the host just runs the Python/CUDA process and stages the model during
   # load. They are set as requests (burstable) — the nvidia.com/gpu limit is the
   # real gate, so there is no need for a large RAM limit here.
-  - name: llm-gpu
+  - name: qwen-gpu
     enabled: true
     spec:
       providerRef:
@@ -432,7 +432,7 @@ cpuProfile:
   enabled: true
   # -- CPU-capable vLLM image used by the CPU profile. The bundled GPU presets
   # use a CUDA image that cannot run on CPU nodes, so this must be a CPU build.
-  image: vllm/vllm-openai-cpu:v0.25.1
+  image: vllm/vllm-openai-cpu:v0.31.0
   # -- Default vLLM args applied to the CPU profile's model-server container.
   # These keep vLLM CPU within a modest node: cap the startup memory reservation
   # (--gpu-memory-utilization, which governs CPU memory despite its name), skip

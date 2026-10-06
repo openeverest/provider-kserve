@@ -17,12 +17,11 @@
 componentTypes:
   vllm:
     versions:
-      # The vLLM build the provider actually controls: the CPU profile image
-      # (charts/provider-kserve/values.yaml, cpuProfile.image). The bundled GPU
-      # presets run KServe's own runtime image (ghcr.io/llm-d/llm-d-cuda:v0.9.0
-      # as of KServe v0.21.0), which is not selectable through this catalog.
-      - version: "0.25.1"
-        image: vllm/vllm-openai-cpu:v0.25.1
+      # The vLLM in the bundled GPU presets' runtime image (llm-d v0.9.0 ships
+      # vLLM 0.26.0 as of KServe v0.21.0). The CPU profile runs its own build,
+      # cpuProfile.image in charts/provider-kserve/values.yaml.
+      - version: "0.26.0"
+        image: ghcr.io/llm-d/llm-d-cuda:v0.9.0
         default: true
   modelServer:
     versions:
@@ -39,11 +38,11 @@ versions:
   - name: "0.21"
     default: true
     components:
-      llmEngine: "0.25.1"
+      llmEngine: "0.26.0"
       predictor: "0.21.0"
   # Instances created before the v0.21 upgrade froze "0.20" in status.version,
   # and the runtime fails them if the name disappears. They now run on 0.21.
   - name: "0.20"
     components:
-      llmEngine: "0.25.1"
+      llmEngine: "0.26.0"
       predictor: "0.21.0"

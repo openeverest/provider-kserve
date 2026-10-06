@@ -10,8 +10,8 @@ spec:
     vllm:
       versions:
         - default: true
-          image: vllm/vllm-openai-cpu:v0.25.1
-          version: 0.25.1
+          image: ghcr.io/llm-d/llm-d-cuda:v0.9.0
+          version: 0.26.0
   components:
     llmEngine:
       parametersSchema:
@@ -556,9 +556,9 @@ spec:
               uiType: select
             gpuCount:
               fieldParams:
-                defaultValue: 1
-                helperText: Number of GPUs (nvidia.com/gpu) each model pod requests. GPU profile only — leave empty for CPU. Must be ≥ Tensor parallel size.
+                helperText: Number of GPUs (nvidia.com/gpu) each model pod requests. GPU profile only — leave empty for CPU. Empty defaults to 1 on GPU. Must be ≥ Tensor parallel size.
                 label: GPUs per pod
+                placeholder: 1 on GPU, none on CPU
               path: spec.components.llmEngine.parameters.gpuCount
               uiType: number
               validation:
@@ -743,11 +743,11 @@ spec:
         - advanced
   versions:
     - components:
-        llmEngine: 0.25.1
+        llmEngine: 0.26.0
         predictor: 0.21.0
       default: true
       name: "0.21"
     - components:
-        llmEngine: 0.25.1
+        llmEngine: 0.26.0
         predictor: 0.21.0
       name: "0.20"
