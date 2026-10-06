@@ -224,19 +224,23 @@ and the provider creates a token-limit policy per model. Quotas count real
 tokens per API key and model; exhausted quotas return HTTP 429. Use a durable,
 highly available Redis/Valkey in production: counters are lost if it restarts.
 
-## 7. Known issue: model download memory
+## 7. Model download memory
 
-KServe's storage initializer, which downloads `hf://` models, has a hard-coded
-1 GiB memory limit and is OOM-killed on multi-GB downloads (seen with
-Qwen3 0.6B and 1.7B). Raise it in KServe's config map and restart the
-controller:
+KServe's storage initializer, which downloads `hf://` and `s3://` models, is
+limited to 1 GiB of memory by default and is OOM-killed on multi-GB downloads
+(seen with Qwen3 0.6B and 1.7B). Raise it for all llm Instances in
+`values.yaml` and upgrade:
 
-```sh
-kubectl -n $NS get cm inferenceservice-config -o json \
-  | jq '.data.storageInitializer |= (fromjson | .memoryLimit="4Gi" | .cpuLimit="2" | tojson)' \
-  | kubectl replace -f -
-kubectl -n $NS rollout restart deploy/llmisvc-controller-manager
+```yaml
+storageInitializer:
+  resources:
+    limits:
+      memory: 4Gi
+      cpu: "2"
 ```
+
+The provider applies it to every model pod it creates, so it survives
+`helm upgrade` (unlike editing KServe's `inferenceservice-config`).
 
 ## 8. Deploy a model
 
@@ -330,6 +334,7 @@ Anthropic-style clients can send the key in `x-api-key` instead.
 | `llmisvc-controller-manager` stuck in `ContainerCreating` | step 4 pass b) not run yet (webhook certificate Issuer comes from `kserveResources`) |
 | Certificate not Ready | `kubectl -n $NS get challenge`; the hostname must resolve to the Gateway address and port 80 must be reachable |
 | Model pod `Init:OOMKilled` | step 7 |
+| New model pod `Pending` (`Insufficient nvidia.com/gpu`) after a change | the old pod still holds the GPU; `gpuRecreateRollout.enabled` (default) fixes this on Kubernetes 1.36+ |
 | Instance stays `Provisioning` with "no Gateway controller has accepted it yet" | provider image older than this guide; upgrade the provider |
 | Chart fails: "aiGateway.auth requires HTTPS" | finish step 5, or set `aiGateway.auth.allowInsecureHTTP=true` for local development |
 | Instance `Failed`: model name already served | another Instance on the Gateway uses the same `modelName`; pick a unique one |

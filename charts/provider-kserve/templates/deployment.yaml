@@ -81,6 +81,8 @@ spec:
               value: {{ .Values.metrics.podMonitor.interval | quote }}
             - name: LORA_ADAPTER_CATALOG
               value: {{ .Values.loraAdapters | toJson | quote }}
+            - name: STORAGE_INITIALIZER_RESOURCES
+              value: {{ .Values.storageInitializer.resources | toJson | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

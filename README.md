@@ -585,6 +585,15 @@ external address across different environments:
 - **GPU cloud** (CoreWeave, Lambda, RunPod) — varies by provider
 - **Local development** (k3d, kind, minikube) — MetalLB or `minikube tunnel`
 
+### Model pods: downloads and rollouts
+
+These chart values apply to every `llm` Instance:
+
+| Value | Default | Purpose |
+|---|---|---|
+| `storageInitializer.resources` | `{}` (KServe: 1 CPU, 1Gi) | Resources for the init container that downloads `hf://` / `s3://` models. Raise the memory limit when multi-GB downloads are OOM-killed. |
+| `gpuRecreateRollout.enabled` | `true` | Switch model Deployments that request GPUs to the `Recreate` strategy, so a rollout never waits for a GPU held by the old pod. Implemented as a `MutatingAdmissionPolicy`; skipped on clusters without `admissionregistration.k8s.io/v1` policies (Kubernetes < 1.36). Recreate means a short outage per rollout. |
+
 ### Observability
 
 Each `llm` Instance gets a `PodMonitor` so an existing Prometheus Operator scrapes vLLM's
@@ -766,6 +775,8 @@ kubectl logs -n everest-system deploy/provider-kserve -f
 | Install fails on a cert-manager webhook error | Re-run, or install cert-manager as its own release first and keep `cert-manager.enabled=false` |
 | CPU model fails with "less than desired CPU memory utilization" | Raise the memory limit or lower `--gpu-memory-utilization` — see [CPU memory sizing](#cpu-memory-sizing) |
 | Gated model download fails | Create the `HF_TOKEN` secret and set `huggingface.tokenSecretName` |
+| `llm` model pod `Init:OOMKilled` | Raise `storageInitializer.resources.limits.memory` (KServe defaults to 1Gi) |
+| New `llm` model pod `Pending` with `Insufficient nvidia.com/gpu` after a change | The old pod holds the GPU; keep `gpuRecreateRollout.enabled=true` (needs Kubernetes 1.36+) |
 
 ## Contributing
 

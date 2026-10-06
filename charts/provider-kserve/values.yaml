@@ -266,6 +266,22 @@ huggingface:
   # -- Name of the pre-created Secret (with an HF_TOKEN key) for gated downloads
   tokenSecretName: ""
 
+# KServe's storage-initializer is the init container that downloads hf:// and
+# s3:// models into every llm model pod. KServe caps it at 1 CPU / 1Gi memory,
+# which is OOM-killed on multi-GB downloads. Applies to all llm Instances.
+storageInitializer:
+  # -- Resources for the storage-initializer, for example
+  # `{limits: {memory: 4Gi, cpu: "2"}}`. Empty keeps KServe's defaults.
+  resources: {}
+
+# Roll out model Deployments that request GPUs with the Recreate strategy, so a
+# new pod never waits for a GPU still held by the old one. Uses a
+# MutatingAdmissionPolicy (admissionregistration.k8s.io/v1); skipped on clusters
+# that do not serve that API.
+gpuRecreateRollout:
+  # -- Switch GPU model Deployments to the Recreate strategy
+  enabled: true
+
 # Prometheus Operator metrics scraping. The provider ships no monitoring stack;
 # it only makes model workloads discoverable by an existing Prometheus Operator.
 metrics:
