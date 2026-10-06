@@ -218,10 +218,11 @@ ui:
           path: spec.components.llmEngine.parameters.gpuCount
           fieldParams:
             label: GPUs per pod
-            defaultValue: 1
+            placeholder: 1 on GPU, none on CPU
             helperText: >-
               Number of GPUs (nvidia.com/gpu) each model pod requests. GPU
-              profile only — leave empty for CPU. Must be ≥ Tensor parallel size.
+              profile only — leave empty for CPU. Empty defaults to 1 on GPU.
+              Must be ≥ Tensor parallel size.
           validation:
             min: 1
             max: 16

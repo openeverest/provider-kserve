@@ -203,13 +203,13 @@ For models that do not fit on one node, see [Serve a model that does not fit on 
 <!-- BEGIN GENERATED: versions -->
 | Version bundle | Default | llmEngine (vLLM) | predictor (KServe) |
 |---|---|---|---|
-| `0.21` | ✅ | `0.25.1` | `0.21.0` |
-| `0.20` | | `0.25.1` | `0.21.0` |
+| `0.21` | ✅ | `0.26.0` | `0.21.0` |
+| `0.20` | | `0.26.0` | `0.21.0` |
 
 One set of KServe controllers is installed by the chart. `0.20` is kept only so Instances
 created before the KServe v0.21 upgrade (which froze that name) keep reconciling; they run on
-0.21. The llmEngine version is the CPU profile's vLLM build; the bundled GPU presets run
-KServe's own runtime image and are not selectable here.
+0.21. The llmEngine version is the vLLM in the bundled GPU presets' runtime image
+(`ghcr.io/llm-d/llm-d-cuda:v0.9.0`). The CPU profile runs its own build, `cpuProfile.image`.
 <!-- END GENERATED: versions -->
 
 Source of truth: [definition/versions.yaml](definition/versions.yaml).
@@ -505,7 +505,7 @@ Configure the CPU image in the chart:
 ```yaml
 cpuProfile:
   enabled: true
-  image: vllm/vllm-openai-cpu:v0.25.1
+  image: vllm/vllm-openai-cpu:v0.31.0
 ```
 
 The config is rendered into the release namespace alongside the other presets, so it resolves
