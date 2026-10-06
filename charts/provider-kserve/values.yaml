@@ -328,18 +328,18 @@ leaderElection:
 # reconcile them. These bundled controllers do. Toggle any of them off to
 # manage that piece out of band. See Chart.yaml for the dependency wiring.
 #
-# The KServe CRDs are not part of this chart; install KServe's kserve-crd and
-# kserve-llmisvc-crd charts first (see README), or set kserveCRDs.install.
+# The KServe CRDs are not packaged in this chart; the kserveCRDs hook Job
+# fetches them at install time (see README).
 # ---------------------------------------------------------------------------
 
 # KServe CRDs fetched over the network at install time. When enabled, a
 # pre-install/pre-upgrade hook Job renders KServe's CRD charts from the registry
 # and server-side applies them, so they exist before the controllers start and
-# are upgraded with every `helm upgrade`. Do not combine with installing the
-# same charts as separate Helm releases.
+# are upgraded with every `helm upgrade`. Set install=false when the KServe CRDs
+# are managed elsewhere (for example as KServe's own Helm releases).
 kserveCRDs:
   # -- Install/upgrade the KServe CRDs from the registry in a hook Job
-  install: false
+  install: true
   # -- OCI registry holding KServe's CRD charts (override for mirrors)
   registry: oci://ghcr.io/kserve/charts
   # -- CRD charts to apply
@@ -348,8 +348,9 @@ kserveCRDs:
     - kserve-llmisvc-crd
   # -- CRD chart version; empty uses the bundled kserve-resources chart version
   version: ""
-  # -- Image providing helm and kubectl
-  image: alpine/k8s:1.36.0
+
+# -- Image (with helm and kubectl) for the kserveCRDs and kserve-objects hook Jobs
+hookImage: alpine/k8s:1.36.0
 
 # -- cert-manager provides the webhook certificates the KServe controllers
 # require, so it must be present. Off by default: most clusters already run it,
@@ -372,6 +373,13 @@ kserveResources:
   kserve:
     # -- KServe image tag (the pinned charts are v0.21.0-rc1; see Chart.yaml)
     version: v0.21.0
+    # The ClusterStorageContainer is applied by the kserve-objects hook Job;
+    # the ConfigMap and webhook Issuer stay in the release.
+    createSharedResources: false
+    inferenceServiceConfig:
+      enabled: true
+    certManager:
+      enabled: true
     controller:
       # -- Cluster-wide default deployment mode. Standard (formerly named
       # "RawDeployment") yields plain Kubernetes Deployments + HPA and avoids
@@ -394,35 +402,21 @@ kserveLlmisvcResources:
     controller:
       deploymentMode: Standard
 
-# -- KServe runtime configurations. Ships the `ClusterServingRuntime`s the
-# InferenceService controller selects from by model format (needed by the
-# predictor topology). The `LLMInferenceServiceConfig` presets are NOT taken
-# from this subchart: upstream hardcodes them to the `kserve` namespace, which
-# would force the whole stack into that namespace. The provider renders them
-# into the release namespace instead (see `llmPresets` below), so
-# `llmisvcConfigs.enabled` is left off here.
+# -- KServe's ClusterServingRuntimes, which the InferenceService controller
+# selects from by model format (needed by the predictor topology). Vendored from
+# the kserve-runtime-configs chart by `make sync-kserve-objects` and applied by
+# the kserve-objects hook Job once the KServe webhooks serve.
 kserveRuntimeConfigs:
-  # -- Deploy the KServe runtime configurations
+  # -- Apply the KServe ClusterServingRuntimes
   enabled: true
-  kserve:
-    version: v0.21.0
-    # -- LLMInferenceServiceConfig presets. Disabled: the provider renders these
-    # into the release namespace via `llmPresets` to avoid the hardcoded
-    # `kserve` namespace. Do not enable both or the presets collide.
-    llmisvcConfigs:
-      enabled: false
-    # -- ClusterServingRuntimes required by the predictor topology. These are
-    # cluster-scoped, so no namespace rewriting is needed.
-    servingruntime:
-      enabled: true
 
 # -- LLMInferenceServiceConfig presets required by the llm topology (without
 # them it stalls with `ConfigNotFound: kserve-config-llm-template`). These are
 # vendored from KServe under this chart's `files/llmisvcconfigs/` directory (see
-# `make sync-llm-presets`) and rendered into the release namespace, replacing
-# the upstream copies that are hardcoded to the `kserve` namespace. This is what
-# lets the provider run in any namespace. Disable if you manage the presets out
-# of band.
+# `make sync-kserve-objects`) and applied into the release namespace by the
+# kserve-objects hook Job, replacing the upstream copies that are hardcoded to
+# the `kserve` namespace. This is what lets the provider run in any namespace.
+# Disable if you manage the presets out of band.
 llmPresets:
   # -- Render the LLMInferenceServiceConfig presets into the release namespace
   enabled: true

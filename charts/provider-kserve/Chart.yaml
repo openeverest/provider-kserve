@@ -55,16 +55,6 @@ dependencies:
     version: "v0.21.0-rc1"
     repository: "oci://ghcr.io/kserve/charts"
     condition: kserveLlmisvcResources.enabled
-  # KServe runtime configurations — ships the well-known LLMInferenceServiceConfig
-  # presets the llmisvc controller resolves (kserve-config-llm-*) and the
-  # ClusterServingRuntimes the InferenceService controller selects by model
-  # format. Without these the llm topology stalls with ConfigNotFound and the
-  # predictor topology has no runtime to schedule.
-  - name: kserve-runtime-configs
-    alias: kserveRuntimeConfigs
-    version: "v0.21.0-rc1"
-    repository: "oci://ghcr.io/kserve/charts"
-    condition: kserveRuntimeConfigs.enabled
   # Optional Envoy data-plane controller. AI Gateway v0.4 requires Envoy
   # Gateway v1.5+ and the xDS extension-manager integration configured in
   # values.yaml.

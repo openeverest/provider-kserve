@@ -28,7 +28,7 @@ const (
 	computeProfileCPU = "cpu"
 
 	// cpuProfileConfigName is the name of the bundled CPU LLMInferenceServiceConfig
-	// rendered by the chart (templates/llmisvcconfig-cpu.yaml). It must match the
+	// rendered by the chart (templates/_kserve-objects.tpl). It must match the
 	// chart's metadata.name.
 	cpuProfileConfigName = "kserve-config-llm-cpu"
 

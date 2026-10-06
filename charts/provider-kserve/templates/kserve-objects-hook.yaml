@@ -1,13 +1,22 @@
-{{- if .Values.kserveCRDs.install }}
-{{- $version := .Values.kserveCRDs.version }}
-{{- if not $version }}
-{{- range .Chart.Dependencies }}
-{{- /* Helm rewrites a dependency's Name to its alias and drops disabled ones; all KServe subcharts share one version. */}}
-{{- if and (not $version) (has .Name (list "kserveResources" "kserveLlmisvcResources")) }}{{- $version = .Version }}{{- end }}
-{{- end }}
-{{- end }}
-{{- if not $version }}{{ fail "kserveCRDs: set kserveCRDs.version (no KServe subchart enabled)" }}{{- end }}
-{{- $name := printf "%s-kserve-crds" (include "provider-kserve.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- $objects := include "provider-kserve.kserveObjects" . | trim }}
+{{- if $objects }}
+{{- $name := printf "%s-kserve-objects" (include "provider-kserve.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- $hook := "post-install,post-upgrade" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provider-kserve.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $hook }}
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+  objects.yaml: |
+{{ $objects | indent 4 }}
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -16,7 +25,7 @@ metadata:
   labels:
     {{- include "provider-kserve.labels" . | nindent 4 }}
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook: {{ $hook }}
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 ---
@@ -27,13 +36,16 @@ metadata:
   labels:
     {{- include "provider-kserve.labels" . | nindent 4 }}
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook: {{ $hook }}
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 rules:
-  - apiGroups: ["apiextensions.k8s.io"]
-    resources: ["customresourcedefinitions"]
-    verbs: ["get", "list", "watch", "create", "patch", "update"]
+  - apiGroups: ["serving.kserve.io"]
+    resources: ["clusterservingruntimes", "clusterstoragecontainers", "llminferenceserviceconfigs"]
+    verbs: ["get", "list", "create", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -42,7 +54,7 @@ metadata:
   labels:
     {{- include "provider-kserve.labels" . | nindent 4 }}
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook: {{ $hook }}
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 roleRef:
@@ -62,19 +74,19 @@ metadata:
   labels:
     {{- include "provider-kserve.labels" . | nindent 4 }}
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook: {{ $hook }}
     helm.sh/hook-weight: "-5"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 2
-  # Fail the install instead of hanging when the registry is unreachable.
-  activeDeadlineSeconds: 300
+  backoffLimit: 0
+  # Covers the KServe controller image pulls on a fresh cluster.
+  activeDeadlineSeconds: 900
   template:
     metadata:
       labels:
         helm.sh/chart: {{ include "provider-kserve.chart" . }}
         app.kubernetes.io/managed-by: {{ .Release.Service }}
-        app.kubernetes.io/component: kserve-crds
+        app.kubernetes.io/component: kserve-objects
     spec:
       restartPolicy: Never
       serviceAccountName: {{ $name }}
@@ -89,7 +101,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: kserve-crds
+        - name: kserve-objects
           image: {{ .Values.hookImage }}
           imagePullPolicy: IfNotPresent
           securityContext:
@@ -101,31 +113,41 @@ spec:
           env:
             - name: HOME
               value: /tmp
-            - name: REGISTRY
-              value: {{ .Values.kserveCRDs.registry | quote }}
-            - name: VERSION
-              value: {{ $version | quote }}
+            - name: NAMESPACE
+              value: {{ .Release.Namespace }}
           command:
             - /bin/sh
             - -ec
             - |
-              applied=""
-              for chart in {{ join " " .Values.kserveCRDs.charts }}; do
-                echo "Applying ${REGISTRY}/${chart}:${VERSION}"
-                applied="${applied} $(helm template "${chart}" "${REGISTRY}/${chart}" --version "${VERSION}" \
-                  | kubectl apply --server-side --force-conflicts --field-manager=provider-kserve-crds -o name -f -)"
+              # The KServe admission webhooks validate these objects.
+              for d in {{ if .Values.kserveResources.enabled }}kserve-controller-manager{{ end }} {{ if .Values.kserveLlmisvcResources.enabled }}llmisvc-controller-manager{{ end }}; do
+                kubectl -n "${NAMESPACE}" rollout status "deploy/${d}" --timeout=600s
               done
-              kubectl wait --for=condition=Established --timeout=120s ${applied}
+              for attempt in $(seq 1 30); do
+                if kubectl apply --server-side --force-conflicts --field-manager=provider-kserve \
+                    -f /objects/objects.yaml; then
+                  exit 0
+                fi
+                echo "Attempt ${attempt} failed (webhook not ready?), retrying in 10s"
+                sleep 10
+              done
+              exit 1
           resources:
             requests:
               cpu: 50m
-              memory: 128Mi
+              memory: 64Mi
             limits:
-              memory: 512Mi
+              memory: 256Mi
           volumeMounts:
+            - name: objects
+              mountPath: /objects
+              readOnly: true
             - name: tmp
               mountPath: /tmp
       volumes:
+        - name: objects
+          configMap:
+            name: {{ $name }}
         - name: tmp
           emptyDir: {}
       {{- with .Values.nodeSelector }}

@@ -273,14 +273,6 @@ local_resource(
     labels=['provider'],
 )
 
-# KServe CRDs are their own Helm releases, installed before the provider chart.
-local_resource(
-    'kserve-crds',
-    'make -C {0} helm-install-crds'.format(provider_dir),
-    deps=['{0}/charts/provider-kserve/Chart.yaml'.format(provider_dir)],
-    labels=['provider'],
-)
-
 # ===========================
 # Provider: Helm chart
 # ===========================
@@ -290,13 +282,11 @@ local_resource(
 # helm_resource also guarantees the Provider CR is applied only after the core
 # CRDs exist.
 #
-# First install: llmisvc controller (KServe CRDs come from the kserve-crds
-# resource above). kserve-resources is off — its ClusterServingRuntimes and
-# LLMInferenceServiceConfigs go through admission webhooks that are not ready
-# until the controllers are. Post-install turns kserve-resources on, then the
-# webhook-gated resources. cert-manager is its own release, bundled copy off.
+# One release installs everything: hook Jobs fetch the KServe CRDs and apply
+# the KServe runtimes and LLM presets once the controllers serve their
+# webhooks. cert-manager is its own release, bundled copy off.
 
-provider_resource_deps = ['provider-build', 'provider-helm-deps', 'kserve-crds']
+provider_resource_deps = ['provider-build', 'provider-helm-deps']
 if install_openeverest:
     provider_resource_deps = provider_resource_deps + ['openeverest', 'openeverest-crds']
 if install_cert_manager:
@@ -308,13 +298,6 @@ provider_flags = [
     '--set', 'securityContext.readOnlyRootFilesystem=false',
     # cert-manager is installed as its own release above.
     '--set', 'cert-manager.enabled=false',
-    '--set', 'kserveResources.enabled=false',
-    # Disable resources that trigger webhooks (ClusterServingRuntimes,
-    # LLMInferenceServiceConfigs). They will be applied after controllers are
-    # ready via the post-install resource below.
-    '--set', 'kserveRuntimeConfigs.enabled=false',
-    '--set', 'llmPresets.enabled=false',
-    '--set', 'cpuProfile.enabled=false',
 ]
 if enable_ai_gateway:
     provider_flags = provider_flags + [
@@ -340,50 +323,6 @@ helm_resource(
     image_deps=[provider_image],
     image_keys=[('image.repository', 'image.tag')],
     resource_deps=provider_resource_deps,
-    labels=['provider'],
-)
-
-# ===========================
-# Post-install: enable runtime configs after controllers are ready
-# ===========================
-# Enable kserve-resources now that the CRDs exist, wait for both controllers,
-# then enable resources their webhooks validate (ClusterServingRuntimes,
-# LLMInferenceServiceConfigs).
-post_install_cmd = (
-    'helm upgrade provider-kserve {chart} --namespace {ns} --reuse-values '
-    + '--set image.pullPolicy=IfNotPresent '
-    + '--set securityContext.readOnlyRootFilesystem=false '
-    + '--set cert-manager.enabled=false '
-    + '--set kserveResources.enabled=true '
-    + '--set kserveRuntimeConfigs.enabled=false '
-    + '--set llmPresets.enabled=false '
-    + '--set cpuProfile.enabled=false && '
-    + 'echo "Waiting for KServe controllers to exist..." && '
-    + 'for i in $(seq 1 90); do kubectl get deployment/kserve-controller-manager -n {ns} >/dev/null 2>&1 && break; echo "Attempt $i: not found yet, sleeping 5s..."; sleep 5; done && '
-    + 'kubectl get deployment/kserve-controller-manager -n {ns} || (echo "ERROR: kserve-controller-manager never appeared" && exit 1) && '
-    + 'kubectl wait --for=condition=available deployment/kserve-controller-manager -n {ns} --timeout=300s && '
-    + 'kubectl wait --for=condition=available deployment/llmisvc-controller-manager -n {ns} --timeout=300s && '
-    + 'sleep 10 && '
-    + 'helm upgrade provider-kserve {chart} --namespace {ns} --reuse-values '
-    + '--set image.pullPolicy=IfNotPresent '
-    + '--set securityContext.readOnlyRootFilesystem=false '
-    + '--set cert-manager.enabled=false '
-    + '--set kserveResources.enabled=true '
-    + '--set kserveRuntimeConfigs.enabled=true '
-    + '--set llmPresets.enabled=true '
-    + '--set cpuProfile.enabled=true'
-).format(ns=provider_namespace, chart=chart_dir)
-
-if enable_ai_gateway:
-    post_install_cmd = post_install_cmd + ' --set aiGateway.enabled=true --set envoy-gateway.enabled=true --set envoy-ai-gateway.enabled=true --set aiGateway.auth.allowInsecureHTTP=true'
-
-if enable_metrics:
-    post_install_cmd = post_install_cmd + ' --set metrics.grafanaDashboards.enabled=true --set metrics.grafanaDashboards.namespace=monitoring'
-
-local_resource(
-    'provider-kserve-post-install',
-    post_install_cmd,
-    resource_deps=['provider-kserve'],
     labels=['provider'],
 )
 
