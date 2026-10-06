@@ -67,14 +67,21 @@ helm-sync-rbac: yq ## Sync generated RBAC rules into the Helm chart.
 	} > $(CHART_DIR)/generated/rbac-rules.yaml
 	@echo "Done."
 
-.PHONY: sync-llm-presets
-sync-llm-presets: yq ## Vendor the KServe LLM preset configs, at the pinned chart version, into the chart.
-	@ver=$$($(YQ) '.dependencies[] | select(.name == "kserve-runtime-configs") | .version' $(CHART_DIR)/Chart.yaml); \
-	echo "Syncing KServe LLM preset configs ($$ver) into $(CHART_DIR)/files/..."; \
+.PHONY: sync-kserve-objects
+sync-kserve-objects: yq ## Vendor the KServe LLM presets, ClusterServingRuntimes and ClusterStorageContainer, at the pinned version, into the chart.
+	@ver=$$($(YQ) '.dependencies[] | select(.name == "kserve-resources") | .version' $(CHART_DIR)/Chart.yaml); \
+	img=$$($(YQ) '.kserveResources.kserve.version // ""' $(CHART_DIR)/values.yaml); img=$${img:-$$ver}; \
+	echo "Syncing KServe objects (charts $$ver, images $$img) into $(CHART_DIR)/files/..."; \
 	tmp=$$(mktemp -d); \
 	helm pull oci://ghcr.io/kserve/charts/kserve-runtime-configs --version $$ver --untar --untardir $$tmp >/dev/null && \
-	mkdir -p $(CHART_DIR)/files/llmisvcconfigs && \
-	cp $$tmp/kserve-runtime-configs/files/llmisvcconfigs/resources.yaml $(CHART_DIR)/files/llmisvcconfigs/resources.yaml; \
+	helm pull oci://ghcr.io/kserve/charts/kserve-resources --version $$ver --untar --untardir $$tmp >/dev/null && \
+	mkdir -p $(CHART_DIR)/files/llmisvcconfigs $(CHART_DIR)/files/kserve && \
+	cp $$tmp/kserve-runtime-configs/files/llmisvcconfigs/resources.yaml $(CHART_DIR)/files/llmisvcconfigs/resources.yaml && \
+	helm template kserve $$tmp/kserve-runtime-configs --set kserve.version=$$img \
+		--set kserve.llmisvcConfigs.enabled=false --set kserve.servingruntime.enabled=true \
+		> $(CHART_DIR)/files/kserve/clusterservingruntimes.yaml && \
+	helm template kserve $$tmp/kserve-resources --set kserve.version=$$img --set kserve.storagecontainer.enabled=true \
+		-s templates/common/clusterstoragecontainer.yaml > $(CHART_DIR)/files/kserve/clusterstoragecontainer.yaml; \
 	status=$$?; rm -rf $$tmp; exit $$status
 
 .PHONY: sync-dashboards
@@ -85,7 +92,7 @@ sync-dashboards: ## Copy Grafana dashboard JSON from docs/ into the Helm chart.
 	@echo "Done."
 
 .PHONY: generate
-generate: manifests helm-sync-rbac sync-llm-presets sync-dashboards ## Run all code generation (RBAC + Helm sync + LLM presets + dashboards + provider spec from definition/).
+generate: manifests helm-sync-rbac sync-kserve-objects sync-dashboards ## Run all code generation (RBAC + Helm sync + LLM presets + dashboards + provider spec from definition/).
 	go generate ./...
 	@echo "All generation complete."
 
@@ -116,10 +123,9 @@ docker-push: ## Push docker image.
 
 ##@ Helm
 
-# KServe CRD charts, installed as their own Helm releases before the provider
-# chart: shipping them inside it pushes its release over Kubernetes' 1 MiB
-# Secret limit, and Helm never upgrades CRDs from a chart's crds/ directory.
-# Version follows the KServe controller charts pinned in Chart.yaml.
+# KServe CRD charts, for clusters that set kserveCRDs.install=false and manage
+# the CRDs as their own Helm releases. Version follows the KServe controller
+# charts pinned in Chart.yaml.
 KSERVE_CRD_CHARTS ?= kserve-crd kserve-llmisvc-crd
 
 .PHONY: helm-deps
@@ -136,11 +142,11 @@ helm-install-crds: yq ## Install/upgrade the KServe CRD charts as their own rele
 	done
 
 .PHONY: helm-install
-helm-install: helm-deps helm-install-crds ## Install the provider using Helm.
+helm-install: helm-deps ## Install the provider using Helm.
 	helm install provider-kserve $(CHART_DIR) --create-namespace
 
 .PHONY: helm-upgrade
-helm-upgrade: helm-deps helm-install-crds ## Upgrade the provider using Helm.
+helm-upgrade: helm-deps ## Upgrade the provider using Helm.
 	helm upgrade provider-kserve $(CHART_DIR)
 
 .PHONY: helm-uninstall

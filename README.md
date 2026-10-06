@@ -82,16 +82,30 @@ Models are pulled from the URI given in the component parameters (`hf://`, `s3:/
 > cert-manager, and a same-release install races its webhook against the KServe `Issuer` /
 > `Certificate`. See [KServe CRDs](#kserve-crds).
 
-Install the KServe CRDs (their own releases, see [KServe CRDs](#kserve-crds)), then the
-published chart from the GHCR OCI registry:
+Install the published chart from the GHCR OCI registry. One command installs the KServe CRDs,
+the KServe controllers, their `ClusterServingRuntime`s and LLM presets, and the provider:
 
 ```bash
-for c in kserve-crd kserve-llmisvc-crd; do
-  helm upgrade --install $c oci://ghcr.io/kserve/charts/$c --version v0.21.0-rc1 -n everest-system
-done
 helm install provider-kserve \
   oci://ghcr.io/openeverest/charts/provider-kserve -n everest-system
 ```
+
+Add the AI Gateway and multi-node (LeaderWorkerSet) support in the same command:
+
+```bash
+helm install provider-kserve \
+  oci://ghcr.io/openeverest/charts/provider-kserve -n everest-system \
+  --set envoy-gateway.enabled=true --set envoy-ai-gateway.enabled=true \
+  --set aiGateway.enabled=true \
+  --set aiGateway.tls.enabled=true --set aiGateway.tls.hostname=<host> \
+  --set aiGateway.tls.issuerRef.name=<cluster-issuer> \
+  --set lws.enabled=true
+```
+
+See [docs/ai-gateway-setup.md](docs/ai-gateway-setup.md) for TLS and authentication. The
+install takes 2–3 minutes: hook Jobs fetch the KServe CRDs from `ghcr.io` and apply the KServe
+objects once the controllers serve their webhooks, so the cluster needs egress to `ghcr.io`
+(see [KServe CRDs](#kserve-crds)).
 
 <details>
 <summary>Install from a checkout (development)</summary>
@@ -100,7 +114,6 @@ helm install provider-kserve \
 git clone https://github.com/openeverest/provider-kserve.git
 cd provider-kserve
 make helm-deps           # helm dependency update (adds the jetstack repo for cert-manager)
-make helm-install-crds   # KServe CRD charts at the version pinned in Chart.yaml
 helm install provider-kserve charts/provider-kserve --namespace everest-system
 ```
 
@@ -124,9 +137,9 @@ Uninstall:
 helm uninstall provider-kserve --namespace everest-system
 ```
 
-Uninstalling the chart does **not** delete running `Instance` resources or the KServe CRDs,
-which belong to the `kserve-crd` / `kserve-llmisvc-crd` releases. See
-[KServe CRDs](#kserve-crds).
+Uninstalling the chart does **not** delete running `Instance` resources, the KServe CRDs, or
+the `ClusterServingRuntime`s, `ClusterStorageContainer` and LLM presets the hook Job applied.
+See [KServe CRDs](#kserve-crds).
 
 ## Usage
 
@@ -623,7 +636,6 @@ reconcile them. The controllers that do are bundled as Helm subchart dependencie
 |---|---|---|
 | `kserve-resources` | `InferenceService` (predictor) | `kserveResources.enabled` |
 | `kserve-llmisvc-resources` | `LLMInferenceService` (llm) | `kserveLlmisvcResources.enabled` |
-| `kserve-runtime-configs` | `ClusterServingRuntime`s (predictor) | `kserveRuntimeConfigs.enabled` |
 | `cert-manager` | webhook certificates for both | `cert-manager.enabled` (off by default) |
 | `lws` | LeaderWorkerSet, for multi-node `llm` Instances (`workerCount`) | `lws.enabled` (off by default) |
 
@@ -633,24 +645,33 @@ example `helm show crds oci://registry.k8s.io/lws/charts/lws --version 0.8.0 | k
 
 The KServe CRDs are **not** part of this chart (see [KServe CRDs](#kserve-crds)).
 
-The `kserve-runtime-configs` chart ships the `ClusterServingRuntime`s the InferenceService
-controller selects from by model format — without them the `predictor` topology has no runtime
-to schedule.
+### KServe objects
 
-The `LLMInferenceServiceConfig` presets (`kserve-config-llm-template`, …) that the llmisvc
-controller merges into every `LLMInferenceService` are **not** taken from that subchart.
-Upstream hardcodes them to the `kserve` namespace, and the llmisvc controller resolves presets
-from its own pod namespace (`POD_NAMESPACE`), which would force the whole stack into `kserve`.
-Instead the provider vendors the preset file (see `make sync-llm-presets`) under the chart's
-`files/llmisvcconfigs/` directory and renders it into the **release namespace** (toggle
-`llmPresets.enabled`). This is what lets the provider install into any namespace. Without the
-presets the `llm` topology stalls with `ConfigNotFound: kserve-config-llm-template`.
+The controllers also need KServe objects of the CRD kinds:
+
+| Objects | Needed by | Toggle |
+|---|---|---|
+| `ClusterServingRuntime`s | `predictor` (runtime selected by model format) | `kserveRuntimeConfigs.enabled` |
+| `ClusterStorageContainer` `default` | `predictor` (model download) | `kserveResources.enabled` |
+| `LLMInferenceServiceConfig` presets | `llm` (else `ConfigNotFound: kserve-config-llm-template`) | `llmPresets.enabled` |
+
+They are **not** regular release resources. Helm checks every kind in a release before it runs
+any hook, so on a fresh cluster (CRDs not yet applied) a release containing them fails, and the
+KServe webhooks that validate them only serve once the controllers run. Instead
+`make sync-kserve-objects` (part of `make generate`) vendors them from KServe's
+`kserve-runtime-configs` and `kserve-resources` charts at the pinned version into the chart's
+`files/`, and a post-install/post-upgrade hook Job waits for the controllers and
+server-side applies them.
+
+The presets are rewritten into the **release namespace**. Upstream hardcodes them to `kserve`,
+and the llmisvc controller resolves presets from its own pod namespace (`POD_NAMESPACE`), so
+this is what lets the provider install into any namespace.
 
 Both controllers default to KServe's **Standard** mode (plain Deployments plus HPA, no
 Knative/Istio), matching the deployment mode the provider annotates on every `InferenceService`
-it creates. `kserve-resources` owns the shared KServe resources (config `ConfigMap`, self-signed
-`Issuer`, `ClusterStorageContainer`); the llmisvc chart has them disabled to avoid collisions
-within one release.
+it creates. `kserve-resources` owns the shared `inferenceservice-config` `ConfigMap` and the
+self-signed webhook `Issuer`; the llmisvc chart has them disabled to avoid collisions within
+one release.
 
 Vendor the dependencies before installing from a checkout:
 
@@ -661,62 +682,38 @@ make helm-deps   # helm dependency update (adds the jetstack repo for cert-manag
 ## KServe CRDs
 
 The KServe CustomResourceDefinitions the provider translates `Instance`s into
-(`InferenceService`, `LLMInferenceService`, and their supporting kinds) come from KServe's own
-`kserve-crd` and `kserve-llmisvc-crd` charts, installed as **separate releases before** the
-provider chart, at the version pinned in [`Chart.yaml`](charts/provider-kserve/Chart.yaml):
+(`InferenceService`, `LLMInferenceService`, and their supporting kinds) are **not** packaged in
+the chart. A pre-install/pre-upgrade hook Job (`kserveCRDs.install`, on by default) renders
+KServe's own `kserve-crd` and `kserve-llmisvc-crd` charts from `kserveCRDs.registry` (default
+`oci://ghcr.io/kserve/charts`, at the KServe version pinned in
+[`Chart.yaml`](charts/provider-kserve/Chart.yaml)) and server-side applies them, on every
+install and upgrade.
 
-```bash
-make helm-install-crds   # or the helm loop in Installation
-```
+Why not inside the chart: together with the bundled controllers and gateways they push the
+Helm release past Kubernetes' 1 MiB Secret limit, and Helm never upgrades CRDs from a chart's
+`crds/` directory. Applied by the hook, they upgrade with every `helm upgrade` and stay in place
+on `helm uninstall`.
 
-Why not inside the provider chart: together with the bundled controllers and gateways they push
-the provider's Helm release past Kubernetes' 1 MiB Secret limit, and Helm never upgrades CRDs
-from a chart's `crds/` directory. As separate releases they upgrade with `helm upgrade` (run
-`make helm-install-crds` again after bumping the KServe version), and `helm uninstall` of the
-provider leaves them in place. Skip them when the cluster already has the KServe CRDs.
-
-**Or let the provider chart fetch them** (`kserveCRDs.install=true`): a pre-install/pre-upgrade
-hook Job renders the same two charts from `kserveCRDs.registry` (default `oci://ghcr.io/kserve/charts`,
-at the bundled KServe version) and server-side applies them before anything else in the release,
-on every install and upgrade. Use this or the separate releases, not both.
-
-- The cluster needs egress to the registry (or point `kserveCRDs.registry` at a mirror).
-- Helm checks every kind in the release before it runs hooks, so the **first** install must not
-  render KServe objects yet: enable the hook in pass a) of the three-pass install
-  ([docs/ai-gateway-setup.md](docs/ai-gateway-setup.md#4-provider-chart)), which renders none.
-- On an existing release use `--reset-then-reuse-values` (not `--reuse-values`), so the new
-  `kserveCRDs` defaults are picked up.
-- Switching from the separate releases: drop their Helm records only, never `helm uninstall`
-  them (that deletes the CRDs and every model):
+- The cluster needs egress to the registry. Air-gapped: point `kserveCRDs.registry` at a mirror.
+- KServe CRDs managed elsewhere (another KServe install, GitOps): set `kserveCRDs.install=false`
+  and keep them at the pinned version, for example with `make helm-install-crds`.
+- On an existing release use `--reset-then-reuse-values` (not `--reuse-values`), so new
+  defaults are picked up.
+- Switching from the separate `kserve-crd` / `kserve-llmisvc-crd` releases of v0.2.0: drop their
+  Helm records only, never `helm uninstall` them (that deletes the CRDs and every model):
   `kubectl -n <ns> delete secret -l 'owner=helm,name in (kserve-crd,kserve-llmisvc-crd)'`.
-
-**Migrating** a release whose CRDs came from the old `crds/` directory: let the CRD charts adopt
-the existing CRDs before installing them.
-
-```bash
-NS=everest-system
-adopt() {
-  kubectl annotate crd "$2" meta.helm.sh/release-name="$1" meta.helm.sh/release-namespace=$NS --overwrite
-  kubectl label crd "$2" app.kubernetes.io/managed-by=Helm --overwrite
-}
-for crd in llminferenceservices llminferenceserviceconfigs; do adopt kserve-llmisvc-crd $crd.serving.kserve.io; done
-for crd in inferenceservices inferencegraphs servingruntimes clusterservingruntimes \
-           trainedmodels clusterstoragecontainers; do adopt kserve-crd $crd.serving.kserve.io; done
-```
 
 > [!NOTE]
 > The cert-manager CRDs are **not** bundled. The KServe controllers' `Certificate`
 > resources require them, so install cert-manager (with its CRDs) before this chart.
 
-The `LLMInferenceServiceConfig` presets are vendored by `make sync-llm-presets` (part of
-`make generate`) into `files/llmisvcconfigs/`, from the `kserve-runtime-configs` chart at the
-pinned version. When you bump the KServe version, bump the three KServe controller entries in
-`Chart.yaml` together, then:
+When you bump the KServe version, bump the KServe controller entries in `Chart.yaml` and
+`kserveResources.kserve.version` / `kserveLlmisvcResources.kserve.version` in `values.yaml`
+together, then:
 
 ```bash
-make helm-deps           # the controller charts into charts/
-make generate            # presets and generated spec
-make helm-install-crds   # matching CRDs on the cluster
+make helm-deps   # the controller charts into charts/
+make generate    # vendored runtimes, storage container, presets and generated spec
 ```
 
 ## Development
@@ -800,7 +797,8 @@ kubectl logs -n everest-system deploy/provider-kserve -f
 | `Instance` ignored entirely | `spec.providerRef.name` must be `provider-kserve` |
 | `unsupported topology ""` | `spec.topology.type` is required — set `llm` or `predictor` |
 | `ConfigNotFound: kserve-config-llm-template` | The LLM presets are missing; keep `llmPresets.enabled=true` |
-| `predictor` instance has no runtime | `kserve-runtime-configs` must be installed |
+| `predictor` instance has no runtime | Keep `kserveRuntimeConfigs.enabled=true`; check the `<release>-kserve-objects` hook Job logs |
+| Install fails or times out in a hook Job | `kubectl -n <ns> logs job/<release>-kserve-crds` (or `-kserve-objects`); the cluster needs egress to `ghcr.io` |
 | Install fails on a cert-manager webhook error | Re-run, or install cert-manager as its own release first and keep `cert-manager.enabled=false` |
 | CPU model fails with "less than desired CPU memory utilization" | Raise the memory limit or lower `--gpu-memory-utilization` — see [CPU memory sizing](#cpu-memory-sizing) |
 | Gated model download fails | Create the `HF_TOKEN` secret and set `huggingface.tokenSecretName` |

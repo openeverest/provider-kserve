@@ -72,6 +72,7 @@ jobs:
           kubectl get pods -A -o wide || true
           kubectl get events -A --sort-by='.lastTimestamp' || true
           kubectl logs -l app.kubernetes.io/name=provider-kserve --tail=200 --all-containers || true
+          kubectl logs -n default -l 'app.kubernetes.io/component in (kserve-crds,kserve-objects)' --tail=200 --prefix || true
           kubectl logs deployment/kserve-controller-manager -n default --tail=200 || true
           kubectl logs deployment/llmisvc-controller-manager -n default --tail=200 || true
 

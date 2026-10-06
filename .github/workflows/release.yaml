@@ -212,7 +212,6 @@ jobs:
 
       - name: Generate install notes
         run: |
-          KSERVE_VERSION=$(yq '.dependencies[] | select(.name == "kserve-resources") | .version' "$CHART_DIR/Chart.yaml")
           if [ "$IS_RC" = "true" ]; then
             IMAGE_NAME="$PROVIDER_DEV_IMAGE_NAME"
           else
@@ -228,10 +227,8 @@ jobs:
           Platforms: \`linux/amd64\`, \`linux/arm64\`
 
           ### Install with Helm
+          Requires cert-manager. Installs the KServe CRDs, controllers and the provider:
           \`\`\`bash
-          for c in kserve-crd kserve-llmisvc-crd; do
-            helm upgrade --install \$c oci://ghcr.io/kserve/charts/\$c --version ${KSERVE_VERSION} -n everest-system
-          done
           helm install provider-kserve \\
             oci://${REGISTRY}/${{ github.repository_owner }}/charts/provider-kserve \\
             --version ${VERSION} -n everest-system

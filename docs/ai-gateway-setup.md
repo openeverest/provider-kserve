@@ -111,46 +111,18 @@ leave `envoy-gateway.enabled` off and apply the `envoy-gateway.config`
 extension-manager settings from the chart's `values.yaml` to it instead;
 running two Envoy Gateways makes them fight over the same Gateways.
 
-The KServe CRDs are not part of the provider chart. Let it fetch them from
-`ghcr.io` in a hook Job by adding this to `values.yaml`:
-
-```yaml
-kserveCRDs:
-  install: true
-```
-
-or install them yourself first as separate releases (then leave
-`kserveCRDs.install` off):
+The chart fetches the KServe CRDs from `ghcr.io` in a hook Job
+(`kserveCRDs.install`, on by default) and applies the KServe runtimes and LLM
+presets in a second hook Job once the controllers serve their webhooks, so one
+command installs everything:
 
 ```sh
-for c in kserve-crd kserve-llmisvc-crd; do
-  helm upgrade -i $c oci://ghcr.io/kserve/charts/$c --version v0.21.0-rc1 -n $NS --create-namespace
-done
-```
-
-The KServe webhooks must be running before the chart can create the resources
-they validate, so install in three passes (the same order the Tilt setup uses):
-
-```sh
-CHART=charts/provider-kserve   # or the published chart
-# a) controllers only
+CHART=oci://ghcr.io/openeverest/charts/provider-kserve   # or charts/provider-kserve
 helm upgrade -i provider-kserve $CHART -n $NS --create-namespace -f values.yaml \
-  --set kserveResources.enabled=false --set kserveRuntimeConfigs.enabled=false \
-  --set llmPresets.enabled=false --set cpuProfile.enabled=false \
   --set aiGateway.auth.allowInsecureHTTP=true        # temporary, until step 5
-# b) KServe InferenceService controller (owns the shared webhook Issuer)
-helm upgrade provider-kserve $CHART -n $NS -f values.yaml \
-  --set kserveRuntimeConfigs.enabled=false --set llmPresets.enabled=false \
-  --set cpuProfile.enabled=false --set aiGateway.auth.allowInsecureHTTP=true
-kubectl -n $NS rollout status deploy/kserve-controller-manager
-kubectl -n $NS rollout status deploy/llmisvc-controller-manager
-# c) runtime configs and LLM presets
-helm upgrade provider-kserve $CHART -n $NS -f values.yaml \
-  --set aiGateway.auth.allowInsecureHTTP=true
 ```
 
-Pass a) is expected to report `llmisvc-controller-manager` waiting for its
-webhook certificate until pass b) runs; do not use `--wait` on it.
+It takes 2–3 minutes.
 
 Get the public address of the shared Gateway:
 
