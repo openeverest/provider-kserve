@@ -41,6 +41,7 @@ func Apply(ctx context.Context, cl client.Client, owner client.Object, obj clien
 	obj.SetResourceVersion("")
 	obj.SetManagedFields(nil)
 
+	//nolint:staticcheck // client.Client.Apply needs apply configurations, which the KServe types lack.
 	return cl.Patch(ctx, obj, client.Apply,
 		client.FieldOwner(FieldOwner),
 		client.ForceOwnership,

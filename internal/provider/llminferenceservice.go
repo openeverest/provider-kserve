@@ -676,6 +676,9 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 
 	isCPUProfile := strings.EqualFold(params.ComputeProfile, computeProfileCPU)
 	effRes := withGPUCount(comp.Resources, params.GpuCount, isCPUProfile)
+	if !isCPUProfile {
+		spec.RolloutStrategy = gpuRolloutStrategy()
+	}
 
 	if params.WorkerCount != nil {
 		spec.Worker = buildWorkerPodSpec(overlayResources(effRes, params.WorkerResources), !isCPUProfile)
@@ -767,6 +770,9 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 
 	if topo.EnablePrefill {
 		prefill := &kservev1alpha2.WorkloadSpec{}
+		if !isCPUProfile {
+			prefill.RolloutStrategy = gpuRolloutStrategy()
+		}
 		if scale := prefillScaling(topo); scale.enabled() {
 			prefill.Scaling = buildScalingSpec(scale)
 		} else if topo.PrefillReplicas != nil {
@@ -825,6 +831,15 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		ObjectMeta: c.ObjectMeta(c.Name()),
 		Spec:       spec,
 	}, nil
+}
+
+// gpuRolloutStrategy replaces pods one at a time without surging: a surge pod
+// would wait for a GPU still held by the pod it replaces.
+func gpuRolloutStrategy() *kservev1alpha2.RolloutStrategy {
+	return &kservev1alpha2.RolloutStrategy{
+		MaxSurge:       ptr.To(intstr.FromInt32(0)),
+		MaxUnavailable: ptr.To(intstr.FromInt32(1)),
+	}
 }
 
 // applyStorageInitializerResources overrides the storage-initializer resources

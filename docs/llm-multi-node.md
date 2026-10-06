@@ -14,7 +14,7 @@ on a LeaderWorkerSet: one group of pods per replica, the head serving the API.
 Prerequisites:
 
 - **LeaderWorkerSet** in the cluster. Either let the chart install it
-  (`lws.enabled=true`, LWS v0.8.0, the version KServe v0.20 is built against) or
+  (`lws.enabled=true`, LWS v0.8.0, the version KServe v0.21 is built against) or
   bring your own:
   `kubectl apply --server-side -f https://github.com/kubernetes-sigs/lws/releases/download/v0.8.0/manifests.yaml`.
   Restart `llmisvc-controller-manager` if LWS is installed after it started.

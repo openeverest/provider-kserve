@@ -1,12 +1,13 @@
 module github.com/openeverest/provider-kserve
 
-go 1.26.3
+go 1.26.8
 
 require (
-	github.com/kserve/kserve v0.20.0
+	github.com/kserve/kserve v0.21.0-rc1
 	github.com/openeverest/openeverest/v2 v2.0.0-dev.2
 	k8s.io/api v0.36.3
 	k8s.io/apimachinery v0.36.3
+	k8s.io/client-go v0.36.3
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5
 	knative.dev/pkg v0.0.0-20260120122510-4a022ed9999a
 	sigs.k8s.io/controller-runtime v0.24.1
@@ -15,28 +16,44 @@ require (
 
 require (
 	cel.dev/expr v0.25.1 // indirect
-	cloud.google.com/go v0.122.0 // indirect
-	cloud.google.com/go/auth v0.18.2 // indirect
+	cloud.google.com/go v0.123.0 // indirect
+	cloud.google.com/go/auth v0.20.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
-	cloud.google.com/go/iam v1.5.3 // indirect
-	cloud.google.com/go/monitoring v1.24.3 // indirect
-	cloud.google.com/go/storage v1.56.2 // indirect
+	cloud.google.com/go/iam v1.7.0 // indirect
+	cloud.google.com/go/monitoring v1.29.0 // indirect
+	cloud.google.com/go/storage v1.62.2 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/AlekSi/pointer v1.2.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.4 // indirect
-	github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.7.0 // indirect
+	github.com/AzureAD/microsoft-authentication-library-for-go v1.7.2 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.31.0 // indirect
-	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.53.0 // indirect
-	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.53.0 // indirect
+	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.55.0 // indirect
+	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.55.0 // indirect
 	github.com/Percona-Lab/percona-version-service v0.0.0-20240311164804-ffbc02387a1b // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
-	github.com/aws/aws-sdk-go v1.55.8 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
-	github.com/aws/smithy-go v1.25.1 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.42.1 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.10 // indirect
+	github.com/aws/aws-sdk-go-v2/config v1.32.18 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.17 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.23 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager v0.1.17 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.30 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.30 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.24 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.13 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.14 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.30 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.22 // indirect
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.99.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.0.11 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.30.17 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.36.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.42.1 // indirect
+	github.com/aws/smithy-go v1.27.3 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blendle/zapdriver v1.3.1 // indirect
@@ -58,7 +75,7 @@ require (
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
-	github.com/expr-lang/expr v1.17.6 // indirect
+	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/flosch/pongo2/v6 v6.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
@@ -94,27 +111,24 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-sql-driver/mysql v1.10.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
-	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
-	github.com/google/btree v1.1.3 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/go-containerregistry v0.20.3 // indirect
+	github.com/google/go-containerregistry v0.21.3 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.12 // indirect
-	github.com/googleapis/gax-go/v2 v2.17.0 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.16 // indirect
+	github.com/googleapis/gax-go/v2 v2.22.0 // indirect
 	github.com/googleapis/google-cloud-go-testing v0.0.0-20210719221736-1c9a4c676720 // indirect
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/jmespath/go-jmespath v0.4.1-0.20220621161143-b0104c826a24 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/kedacore/keda/v2 v2.18.0 // indirect
-	github.com/klauspost/compress v1.18.6 // indirect
+	github.com/kedacore/keda/v2 v2.20.2 // indirect
+	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
@@ -131,7 +145,6 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
 	github.com/oasdiff/yaml v0.1.1 // indirect
 	github.com/oasdiff/yaml3 v0.0.14 // indirect
 	github.com/oklog/ulid/v2 v2.1.1 // indirect
@@ -149,7 +162,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.67.5 // indirect
+	github.com/prometheus/common v0.69.0 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
@@ -170,7 +183,7 @@ require (
 	go.mongodb.org/mongo-driver v1.17.9 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.42.0 // indirect
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.65.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.67.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0 // indirect
 	go.opentelemetry.io/otel v1.45.0 // indirect
 	go.opentelemetry.io/otel/metric v1.45.0 // indirect
@@ -192,11 +205,11 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
-	google.golang.org/api v0.269.0 // indirect
-	google.golang.org/genproto v0.0.0-20260128011058-8636f8732409 // indirect
+	google.golang.org/api v0.281.0 // indirect
+	google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260504160031-60b97b32f348 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
-	google.golang.org/grpc v1.81.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260523011958-0a33c5d7ca68 // indirect
+	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/go-playground/validator.v9 v9.31.0 // indirect
@@ -204,9 +217,9 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.36.3 // indirect
-	k8s.io/client-go v0.36.3 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260504175024-7bfe71ffdc10 // indirect
+	k8s.io/streaming v0.36.3 // indirect
 	knative.dev/networking v0.0.0-20260120131110-a7cdca238a0d // indirect
 	knative.dev/serving v0.48.1 // indirect
 	sigs.k8s.io/gateway-api v1.5.1 // indirect
@@ -222,22 +235,7 @@ tool github.com/openeverest/provider-sdk
 // The following alignment directives mirror KServe's go.mod. Replace/exclude
 // directives from a dependency are not applied transitively, so importing the
 // KServe API packages (which pull in KEDA, gateway-api, and knative) requires
-// reproducing them here to keep controller-runtime and k8s.io versions in sync.
-//
-// KEDA v2.18 requires the older controller-runtime webhook API; pin
-// controller-runtime to v0.22.5 and k8s.io modules to v0.34.x to stay compatible.
-replace sigs.k8s.io/controller-runtime => sigs.k8s.io/controller-runtime v0.22.5
-
-replace (
-	k8s.io/api => k8s.io/api v0.34.5
-	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.34.3
-	k8s.io/apimachinery => k8s.io/apimachinery v0.34.5
-	k8s.io/apiserver => k8s.io/apiserver v0.34.3
-	k8s.io/client-go => k8s.io/client-go v0.34.5
-	k8s.io/code-generator => k8s.io/code-generator v0.34.3
-	k8s.io/component-base => k8s.io/component-base v0.34.3
-	k8s.io/component-helpers => k8s.io/component-helpers v0.34.3
-)
+// reproducing them here to keep module versions in sync.
 
 // google.golang.org/grpc/stats/opentelemetry is used by the keda package.
 // Exclude the placeholder version to avoid an ambiguous import error.
@@ -248,6 +246,9 @@ replace github.com/expr-lang/expr => github.com/expr-lang/expr v1.17.7
 
 // CVE-2026-33186: pin grpc to a patched version
 replace google.golang.org/grpc => google.golang.org/grpc v1.79.3
+
+// GHSA-78h2-9frx-2jm8 / CVE-2026-34986: pin go-jose to a patched version
+replace github.com/go-jose/go-jose/v4 => github.com/go-jose/go-jose/v4 v4.1.4
 
 // github.com/lyft/protoc-gen-validate was moved to github.com/envoyproxy/protoc-gen-validate
 replace github.com/lyft/protoc-gen-validate => github.com/envoyproxy/protoc-gen-validate v1.0.4

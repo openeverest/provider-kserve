@@ -111,6 +111,23 @@ leave `envoy-gateway.enabled` off and apply the `envoy-gateway.config`
 extension-manager settings from the chart's `values.yaml` to it instead;
 running two Envoy Gateways makes them fight over the same Gateways.
 
+The KServe CRDs are not part of the provider chart. Let it fetch them from
+`ghcr.io` in a hook Job by adding this to `values.yaml`:
+
+```yaml
+kserveCRDs:
+  install: true
+```
+
+or install them yourself first as separate releases (then leave
+`kserveCRDs.install` off):
+
+```sh
+for c in kserve-crd kserve-llmisvc-crd; do
+  helm upgrade -i $c oci://ghcr.io/kserve/charts/$c --version v0.21.0-rc1 -n $NS --create-namespace
+done
+```
+
 The KServe webhooks must be running before the chart can create the resources
 they validate, so install in three passes (the same order the Tilt setup uses):
 
@@ -334,7 +351,7 @@ Anthropic-style clients can send the key in `x-api-key` instead.
 | `llmisvc-controller-manager` stuck in `ContainerCreating` | step 4 pass b) not run yet (webhook certificate Issuer comes from `kserveResources`) |
 | Certificate not Ready | `kubectl -n $NS get challenge`; the hostname must resolve to the Gateway address and port 80 must be reachable |
 | Model pod `Init:OOMKilled` | step 7 |
-| New model pod `Pending` (`Insufficient nvidia.com/gpu`) after a change | the old pod still holds the GPU; `gpuRecreateRollout.enabled` (default) fixes this on Kubernetes 1.36+ |
+| New model pod `Pending` (`Insufficient nvidia.com/gpu`) after a change | the old pod still holds the GPU; GPU Instances roll out without surge (`rolloutStrategy`), so check `computeProfile` is `gpu` |
 | Instance stays `Provisioning` with "no Gateway controller has accepted it yet" | provider image older than this guide; upgrade the provider |
 | Chart fails: "aiGateway.auth requires HTTPS" | finish step 5, or set `aiGateway.auth.allowInsecureHTTP=true` for local development |
 | Instance `Failed`: model name already served | another Instance on the Gateway uses the same `modelName`; pick a unique one |

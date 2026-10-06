@@ -14,14 +14,11 @@ sources:
 maintainers:
   - name: OpenEverest Contributors
 # The provider translates Instances into KServe custom resources, so the KServe
-# CRDs must exist in the cluster. They are NOT subchart dependencies: Helm
-# renders a subchart's templates in the same pass as the CRs this chart ships,
-# which fails ("resource mapping not found") on a fresh cluster. Instead
-# `make helm-deps` vendors them into the chart's crds/ directory (pulled from
-# the same OCI registry and version as the controllers), and Helm installs
-# crds/ before any templates. Skip them with `helm install --skip-crds` when
-# the cluster already provides the CRDs. Helm never upgrades or deletes crds/
-# CRDs; apply new ones with kubectl when bumping the KServe version.
+# CRDs must exist in the cluster before this chart is installed. They are not
+# part of this chart: install KServe's kserve-crd and kserve-llmisvc-crd charts
+# as their own releases (`make helm-install-crds`). Bundled here they pushed the
+# release over Kubernetes' 1 MiB Secret limit, and Helm never upgrades CRDs
+# from a chart's crds/ directory.
 #
 # The provider only translates Instances into KServe custom resources — it does
 # not reconcile them. The KServe controllers that do are bundled as subchart
@@ -31,7 +28,10 @@ maintainers:
 #
 # The KServe charts are pulled from KServe's published OCI registry
 # (oci://ghcr.io/kserve/charts), all pinned to one version. Run `make helm-deps`
-# to vendor the dependencies into `charts/` and the CRDs into `crds/`.
+# to vendor the dependencies into `charts/`.
+# KServe never published v0.21.0 charts (the v0.21.0 tag still carries the
+# v0.21.0-rc1 charts, identical apart from the version), so the rc1 charts are
+# pinned and values.yaml sets kserve.version to run the v0.21.0 images.
 dependencies:
   # cert-manager issues the admission-webhook certificates the KServe
   # controllers require. Off by default; normally installed beforehand.
@@ -44,7 +44,7 @@ dependencies:
   # Issuer, ClusterStorageContainer).
   - name: kserve-resources
     alias: kserveResources
-    version: "v0.20.0"
+    version: "v0.21.0-rc1"
     repository: "oci://ghcr.io/kserve/charts"
     condition: kserveResources.enabled
   # KServe LLMInferenceService controller + webhook — reconciles the llm
@@ -52,7 +52,7 @@ dependencies:
   # kserve-resources (see values.yaml).
   - name: kserve-llmisvc-resources
     alias: kserveLlmisvcResources
-    version: "v0.20.0"
+    version: "v0.21.0-rc1"
     repository: "oci://ghcr.io/kserve/charts"
     condition: kserveLlmisvcResources.enabled
   # KServe runtime configurations — ships the well-known LLMInferenceServiceConfig
@@ -62,7 +62,7 @@ dependencies:
   # predictor topology has no runtime to schedule.
   - name: kserve-runtime-configs
     alias: kserveRuntimeConfigs
-    version: "v0.20.0"
+    version: "v0.21.0-rc1"
     repository: "oci://ghcr.io/kserve/charts"
     condition: kserveRuntimeConfigs.enabled
   # Optional Envoy data-plane controller. AI Gateway v0.4 requires Envoy
@@ -85,7 +85,7 @@ dependencies:
     repository: "oci://docker.io/envoyproxy"
     condition: envoy-ai-gateway.enabled
   # Optional LeaderWorkerSet controller for multi-node llm Instances
-  # (workerCount). Pinned to the version KServe v0.20 is built against.
+  # (workerCount). Pinned to the version KServe v0.21 is built against.
   - name: lws
     version: "0.8.0"
     repository: "oci://registry.k8s.io/lws/charts"

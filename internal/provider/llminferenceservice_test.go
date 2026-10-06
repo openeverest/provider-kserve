@@ -854,3 +854,36 @@ func TestApplyStorageInitializerResources(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildLLMInferenceServiceRolloutStrategy(t *testing.T) {
+	t.Parallel()
+
+	noSurge := func(t *testing.T, rs *kservev1alpha2.RolloutStrategy) {
+		t.Helper()
+		if rs == nil || rs.MaxSurge == nil || rs.MaxSurge.IntValue() != 0 ||
+			rs.MaxUnavailable == nil || rs.MaxUnavailable.IntValue() != 1 {
+			t.Fatalf("rolloutStrategy = %#v, want maxSurge 0, maxUnavailable 1", rs)
+		}
+	}
+
+	t.Run("gpu decode and prefill never surge", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{EnablePrefill: true}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		noSurge(t, got.Spec.RolloutStrategy)
+		noSurge(t, got.Spec.Prefill.RolloutStrategy)
+	})
+
+	t.Run("cpu profile keeps the default strategy", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, nil, components.VllmCustomSpec{ComputeProfile: "cpu"}, llm.LlmTopologyParameters{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Spec.RolloutStrategy != nil {
+			t.Fatalf("cpu rolloutStrategy = %#v, want nil", got.Spec.RolloutStrategy)
+		}
+	})
+}

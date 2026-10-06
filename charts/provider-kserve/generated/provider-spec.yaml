@@ -5,8 +5,8 @@ spec:
     modelServer:
       versions:
         - default: true
-          image: kserve/kserve-controller:v0.20.0
-          version: 0.20.0
+          image: kserve/kserve-controller:v0.21.0
+          version: 0.21.0
     vllm:
       versions:
         - default: true
@@ -744,6 +744,10 @@ spec:
   versions:
     - components:
         llmEngine: 0.25.1
-        predictor: 0.20.0
+        predictor: 0.21.0
       default: true
+      name: "0.21"
+    - components:
+        llmEngine: 0.25.1
+        predictor: 0.21.0
       name: "0.20"

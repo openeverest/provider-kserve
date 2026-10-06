@@ -274,14 +274,6 @@ storageInitializer:
   # `{limits: {memory: 4Gi, cpu: "2"}}`. Empty keeps KServe's defaults.
   resources: {}
 
-# Roll out model Deployments that request GPUs with the Recreate strategy, so a
-# new pod never waits for a GPU still held by the old one. Uses a
-# MutatingAdmissionPolicy (admissionregistration.k8s.io/v1); skipped on clusters
-# that do not serve that API.
-gpuRecreateRollout:
-  # -- Switch GPU model Deployments to the Recreate strategy
-  enabled: true
-
 # Prometheus Operator metrics scraping. The provider ships no monitoring stack;
 # it only makes model workloads discoverable by an existing Prometheus Operator.
 metrics:
@@ -336,11 +328,28 @@ leaderElection:
 # reconcile them. These bundled controllers do. Toggle any of them off to
 # manage that piece out of band. See Chart.yaml for the dependency wiring.
 #
-# The KServe CRDs are not subchart dependencies: `make helm-deps` vendors them
-# into the chart's crds/ directory, which Helm installs before any templates.
-# Pass `helm install --skip-crds` when the cluster already has the CRDs
-# (shared / BYO-KServe).
+# The KServe CRDs are not part of this chart; install KServe's kserve-crd and
+# kserve-llmisvc-crd charts first (see README), or set kserveCRDs.install.
 # ---------------------------------------------------------------------------
+
+# KServe CRDs fetched over the network at install time. When enabled, a
+# pre-install/pre-upgrade hook Job renders KServe's CRD charts from the registry
+# and server-side applies them, so they exist before the controllers start and
+# are upgraded with every `helm upgrade`. Do not combine with installing the
+# same charts as separate Helm releases.
+kserveCRDs:
+  # -- Install/upgrade the KServe CRDs from the registry in a hook Job
+  install: false
+  # -- OCI registry holding KServe's CRD charts (override for mirrors)
+  registry: oci://ghcr.io/kserve/charts
+  # -- CRD charts to apply
+  charts:
+    - kserve-crd
+    - kserve-llmisvc-crd
+  # -- CRD chart version; empty uses the bundled kserve-resources chart version
+  version: ""
+  # -- Image providing helm and kubectl
+  image: alpine/k8s:1.36.0
 
 # -- cert-manager provides the webhook certificates the KServe controllers
 # require, so it must be present. Off by default: most clusters already run it,
@@ -361,6 +370,8 @@ kserveResources:
   # -- Deploy the KServe InferenceService controller
   enabled: true
   kserve:
+    # -- KServe image tag (the pinned charts are v0.21.0-rc1; see Chart.yaml)
+    version: v0.21.0
     controller:
       # -- Cluster-wide default deployment mode. Standard (formerly named
       # "RawDeployment") yields plain Kubernetes Deployments + HPA and avoids
@@ -374,6 +385,7 @@ kserveLlmisvcResources:
   # -- Deploy the KServe LLMInferenceService controller
   enabled: true
   kserve:
+    version: v0.21.0
     # -- Shared resources are created by kserveResources to avoid duplicate
     # resource conflicts within a single Helm release. If you disable
     # kserveResources but keep this controller, set this to `true` so the
@@ -393,6 +405,7 @@ kserveRuntimeConfigs:
   # -- Deploy the KServe runtime configurations
   enabled: true
   kserve:
+    version: v0.21.0
     # -- LLMInferenceServiceConfig presets. Disabled: the provider renders these
     # into the release namespace via `llmPresets` to avoid the hardcoded
     # `kserve` namespace. Do not enable both or the presets collide.
