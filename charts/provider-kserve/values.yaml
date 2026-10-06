@@ -266,6 +266,14 @@ huggingface:
   # -- Name of the pre-created Secret (with an HF_TOKEN key) for gated downloads
   tokenSecretName: ""
 
+# KServe's storage-initializer is the init container that downloads hf:// and
+# s3:// models into every llm model pod. KServe caps it at 1 CPU / 1Gi memory,
+# which is OOM-killed on multi-GB downloads. Applies to all llm Instances.
+storageInitializer:
+  # -- Resources for the storage-initializer, for example
+  # `{limits: {memory: 4Gi, cpu: "2"}}`. Empty keeps KServe's defaults.
+  resources: {}
+
 # Prometheus Operator metrics scraping. The provider ships no monitoring stack;
 # it only makes model workloads discoverable by an existing Prometheus Operator.
 metrics:
@@ -320,20 +328,36 @@ leaderElection:
 # reconcile them. These bundled controllers do. Toggle any of them off to
 # manage that piece out of band. See Chart.yaml for the dependency wiring.
 #
-# The KServe CRDs are not subchart dependencies: `make helm-deps` vendors them
-# into the chart's crds/ directory, which Helm installs before any templates.
-# Pass `helm install --skip-crds` when the cluster already has the CRDs
-# (shared / BYO-KServe).
+# The KServe CRDs are not part of this chart; install KServe's kserve-crd and
+# kserve-llmisvc-crd charts first (see README), or set kserveCRDs.install.
 # ---------------------------------------------------------------------------
 
+# KServe CRDs fetched over the network at install time. When enabled, a
+# pre-install/pre-upgrade hook Job renders KServe's CRD charts from the registry
+# and server-side applies them, so they exist before the controllers start and
+# are upgraded with every `helm upgrade`. Do not combine with installing the
+# same charts as separate Helm releases.
+kserveCRDs:
+  # -- Install/upgrade the KServe CRDs from the registry in a hook Job
+  install: false
+  # -- OCI registry holding KServe's CRD charts (override for mirrors)
+  registry: oci://ghcr.io/kserve/charts
+  # -- CRD charts to apply
+  charts:
+    - kserve-crd
+    - kserve-llmisvc-crd
+  # -- CRD chart version; empty uses the bundled kserve-resources chart version
+  version: ""
+  # -- Image providing helm and kubectl
+  image: alpine/k8s:1.36.0
+
 # -- cert-manager provides the webhook certificates the KServe controllers
-# require. Both controllers run admission webhooks whose certificates are
-# issued by cert-manager, so it must be present. Set `enabled: false` when the
-# cluster already runs cert-manager (common) — the KServe controllers will then
-# use the existing installation.
+# require, so it must be present. Off by default: most clusters already run it,
+# and installing it in the same release races its CRDs and webhook against the
+# KServe `Issuer` / `Certificate`. Install it first (see README).
 cert-manager:
   # -- Install cert-manager as part of this release
-  enabled: true
+  enabled: false
   # -- Install the cert-manager CRDs (required unless already present)
   crds:
     enabled: true
@@ -346,6 +370,8 @@ kserveResources:
   # -- Deploy the KServe InferenceService controller
   enabled: true
   kserve:
+    # -- KServe image tag (the pinned charts are v0.21.0-rc1; see Chart.yaml)
+    version: v0.21.0
     controller:
       # -- Cluster-wide default deployment mode. Standard (formerly named
       # "RawDeployment") yields plain Kubernetes Deployments + HPA and avoids
@@ -359,6 +385,7 @@ kserveLlmisvcResources:
   # -- Deploy the KServe LLMInferenceService controller
   enabled: true
   kserve:
+    version: v0.21.0
     # -- Shared resources are created by kserveResources to avoid duplicate
     # resource conflicts within a single Helm release. If you disable
     # kserveResources but keep this controller, set this to `true` so the
@@ -378,6 +405,7 @@ kserveRuntimeConfigs:
   # -- Deploy the KServe runtime configurations
   enabled: true
   kserve:
+    version: v0.21.0
     # -- LLMInferenceServiceConfig presets. Disabled: the provider renders these
     # into the release namespace via `llmPresets` to avoid the hardcoded
     # `kserve` namespace. Do not enable both or the presets collide.
@@ -430,12 +458,15 @@ cpuProfile:
 # ---------------------------------------------------------------------------
 # Optional Envoy AI Gateway.
 #
-# When enabled, the chart installs compatible Envoy Gateway and Envoy AI
-# Gateway controllers and creates one shared Gateway. Individual llm Instances
-# opt in with `spec.topology.parameters.enableAIGateway: true`.
+# `aiGateway.enabled` creates one shared Gateway and turns on the feature in
+# the provider. It does not install controllers: either set
+# `envoy-gateway.enabled` / `envoy-ai-gateway.enabled` below, or bring your own
+# Envoy Gateway (v1.5+, with the extension-manager config below) and Envoy AI
+# Gateway. Individual llm Instances opt in with
+# `spec.topology.parameters.externalAccess: EnvoyAIGateway`.
 # TLS is chart-level (`aiGateway.tls`), not an Instance form field.
 aiGateway:
-  # -- Install and configure the shared Envoy AI Gateway stack
+  # -- Create the shared Gateway and enable the AI Gateway access path
   enabled: false
   # -- Scheme published in Instance connection details
   scheme: http
@@ -449,9 +480,14 @@ aiGateway:
     enabled: false
     # -- DNS name clients use for the Gateway, for example llm.example.com
     hostname: ""
-    # -- Secret populated by cert-manager; empty uses <gateway-name>-tls
+    # -- Secret populated by cert-manager (also the Certificate name); empty uses <gateway-name>-tls
     secretName: ""
-    # -- Existing cert-manager Issuer or ClusterIssuer
+    # -- Add a port-80 listener that only serves cert-manager HTTP-01
+    # challenges (Gateway API solver). Model traffic stays on HTTPS.
+    acmeHTTP01: false
+    # -- Existing cert-manager Issuer or ClusterIssuer. cert-manager must run
+    # with Gateway API support (`config.enableGatewayAPI: true`); it creates
+    # the Certificate from the Gateway's annotations.
     issuerRef:
       name: ""
       kind: ClusterIssuer
@@ -459,9 +495,19 @@ aiGateway:
   gatewayService:
     # -- Envoy proxy Service type (LoadBalancer, NodePort, or ClusterIP)
     type: LoadBalancer
+  auth:
+    # -- Require an API key on every request through the shared Gateway. Each
+    # llm Instance gets a generated key in its connection details (password).
+    enabled: true
+    # -- Allow API keys over a plain HTTP listener (local development only)
+    allowInsecureHTTP: false
 
-# Envoy Gateway subchart configuration required by Envoy AI Gateway v0.4.
+# Envoy Gateway subchart. Off by default: a second Envoy Gateway with the same
+# controllerName would fight an existing one over every Gateway. When you bring
+# your own, apply the same `config.envoyGateway` (extension manager) to it.
 envoy-gateway:
+  # -- Install Envoy Gateway into the release namespace
+  enabled: false
   config:
     envoyGateway:
       gateway:
@@ -493,19 +539,31 @@ envoy-gateway:
           fqdn:
             hostname: ai-gateway-controller
             port: 1063
-      # To enable per-user token quotas, add an existing Redis/Valkey endpoint:
+      # To enable per-key token quotas, add an existing Redis/Valkey endpoint:
       # rateLimit:
       #   backend:
       #     type: Redis
       #     redis:
       #       url: valkey.default.svc.cluster.local:6379
 
-# Both optional controllers are installed into the provider release namespace.
-# This upstream value is supplemented by a release-namespace binding rendered
-# by this chart.
+# Envoy AI Gateway controller and CRDs. Off by default; enable together with
+# `envoy-gateway.enabled` (the extension-manager hostname above assumes both
+# run in the release namespace).
 envoy-ai-gateway:
-  envoyGateway:
-    namespace: default
+  # -- Install the Envoy AI Gateway controller and CRDs into the release namespace
+  enabled: false
+  controller:
+    # Labels GenAI metrics with the authenticated API key ID.
+    metricsRequestHeaderAttributes: "x-openeverest-key-id:openeverest.key.id"
 
 envoy-ai-gateway-crds: {}
+
+# LeaderWorkerSet controller, required for multi-node llm Instances
+# (workerCount + pipelineParallelSize). Off by default: its webhook
+# configurations are cluster-scoped, so it cannot sit next to an existing LWS.
+# Its CRD is installed only by `helm install`; apply it first if you enable this
+# with `helm upgrade`.
+lws:
+  # -- Install the LeaderWorkerSet controller and CRD into the release namespace
+  enabled: false
 

@@ -96,6 +96,7 @@
     - gateway.envoyproxy.io
   resources:
     - backendtrafficpolicies
+    - securitypolicies
   verbs:
     - create
     - delete

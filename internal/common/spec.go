@@ -1,7 +1,13 @@
 // Package common defines shared constants used across the provider.
 package common
 
-import "os"
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	corev1 "k8s.io/api/core/v1"
+)
 
 const (
 	// ProviderName is the canonical name of this provider.
@@ -38,10 +44,16 @@ const (
 	aiGatewaySchemeEnvVar    = "AI_GATEWAY_SCHEME"
 	aiGatewayPortEnvVar      = "AI_GATEWAY_PORT"
 	aiGatewayHostnameEnvVar  = "AI_GATEWAY_HOSTNAME"
+	aiGatewayListenerEnvVar  = "AI_GATEWAY_LISTENER_NAME"
 	rateLimitRedisURLEnvVar  = "AI_GATEWAY_RATE_LIMIT_REDIS_URL"
+
+	aiGatewayAuthEnabledEnvVar           = "AI_GATEWAY_AUTH_ENABLED"
+	aiGatewayAuthAllowInsecureHTTPEnvVar = "AI_GATEWAY_AUTH_ALLOW_INSECURE_HTTP"
 
 	podMonitorEnabledEnvVar  = "ENABLE_POD_MONITOR"
 	podMonitorIntervalEnvVar = "POD_MONITOR_INTERVAL"
+
+	storageInitializerResourcesEnvVar = "STORAGE_INITIALIZER_RESOURCES"
 )
 
 // HFTokenSecretName returns the configured HuggingFace token Secret name, or an
@@ -90,9 +102,27 @@ func AIGatewayHostname() string {
 	return os.Getenv(aiGatewayHostnameEnvVar)
 }
 
+// AIGatewayListenerName returns the Gateway listener that serves model traffic.
+// Empty means routes and policies attach to every listener.
+func AIGatewayListenerName() string {
+	return os.Getenv(aiGatewayListenerEnvVar)
+}
+
 // RateLimitRedisURL returns the Redis-compatible global rate-limit backend.
 func RateLimitRedisURL() string {
 	return os.Getenv(rateLimitRedisURLEnvVar)
+}
+
+// AIGatewayAuthEnabled reports whether requests through the shared AI Gateway
+// require an API key.
+func AIGatewayAuthEnabled() bool {
+	return AIGatewayEnabled() && os.Getenv(aiGatewayAuthEnabledEnvVar) == "true"
+}
+
+// AIGatewayAuthAllowInsecureHTTP reports whether API keys may be sent over a
+// plain HTTP listener (local development only).
+func AIGatewayAuthAllowInsecureHTTP() bool {
+	return os.Getenv(aiGatewayAuthAllowInsecureHTTPEnvVar) == "true"
 }
 
 // PodMonitorEnabled reports whether the provider emits a Prometheus Operator
@@ -109,4 +139,21 @@ func PodMonitorInterval() string {
 		return interval
 	}
 	return "30s"
+}
+
+// StorageInitializerResources returns the chart-configured resources for
+// KServe's model download init container, or nil to keep KServe's defaults.
+func StorageInitializerResources() (*corev1.ResourceRequirements, error) {
+	raw := os.Getenv(storageInitializerResourcesEnvVar)
+	if raw == "" {
+		return nil, nil
+	}
+	res := &corev1.ResourceRequirements{}
+	if err := json.Unmarshal([]byte(raw), res); err != nil {
+		return nil, fmt.Errorf("invalid storageInitializer.resources in the provider chart: %w", err)
+	}
+	if len(res.Limits) == 0 && len(res.Requests) == 0 {
+		return nil, nil
+	}
+	return res, nil
 }

@@ -11,6 +11,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
 
+	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
+
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
@@ -783,6 +785,105 @@ func TestValidateLLMGpuCount(t *testing.T) {
 			TensorParallelSize: ptr.To(int32(2)),
 		}, llm.LlmTopologyParameters{})); err != nil {
 			t.Fatal(err)
+		}
+	})
+}
+
+func TestApplyStorageInitializerResources(t *testing.T) {
+	t.Parallel()
+
+	res := &corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("4Gi")},
+	}
+	storageInit := func(pod *corev1.PodSpec) *corev1.Container {
+		if pod == nil {
+			return nil
+		}
+		for i := range pod.InitContainers {
+			if pod.InitContainers[i].Name == "storage-initializer" {
+				return &pod.InitContainers[i]
+			}
+		}
+		return nil
+	}
+
+	tests := []struct {
+		name     string
+		params   components.VllmCustomSpec
+		res      *corev1.ResourceRequirements
+		prefill  bool
+		wantInit bool
+	}{
+		{name: "hf model", params: components.VllmCustomSpec{ModelURI: "hf://org/model"}, res: res, wantInit: true},
+		{name: "s3 model with prefill", params: components.VllmCustomSpec{ModelURI: "s3://bucket/model"}, res: res, prefill: true, wantInit: true},
+		{name: "not configured", params: components.VllmCustomSpec{ModelURI: "hf://org/model"}},
+		{name: "pvc model", params: components.VllmCustomSpec{ModelURI: "pvc://claim/model"}, res: res},
+		{name: "oci model", params: components.VllmCustomSpec{ModelURI: "oci://registry/model"}, res: res},
+		{name: "storage initializer disabled", params: components.VllmCustomSpec{ModelURI: "hf://org/model", DisableStorageInitializer: ptr.To(true)}, res: res},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			spec := kservev1alpha2.LLMInferenceServiceSpec{}
+			spec.Template = &corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}}
+			spec.Worker = &corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}}
+			if tt.prefill {
+				spec.Prefill = &kservev1alpha2.WorkloadSpec{}
+			}
+			applyStorageInitializerResources(&spec, tt.params, tt.res)
+
+			pods := []*corev1.PodSpec{spec.Template, spec.Worker}
+			if tt.prefill {
+				pods = append(pods, spec.Prefill.Template)
+			}
+			for _, pod := range pods {
+				got := storageInit(pod)
+				if !tt.wantInit {
+					if got != nil {
+						t.Fatalf("unexpected storage-initializer override: %#v", got)
+					}
+					continue
+				}
+				if got == nil {
+					t.Fatalf("missing storage-initializer override in %#v", pod)
+				}
+				if mem := got.Resources.Limits[corev1.ResourceMemory]; mem.Cmp(resource.MustParse("4Gi")) != 0 {
+					t.Fatalf("memory limit = %s, want 4Gi", mem.String())
+				}
+			}
+		})
+	}
+}
+
+func TestBuildLLMInferenceServiceRolloutStrategy(t *testing.T) {
+	t.Parallel()
+
+	noSurge := func(t *testing.T, rs *kservev1alpha2.RolloutStrategy) {
+		t.Helper()
+		if rs == nil || rs.MaxSurge == nil || rs.MaxSurge.IntValue() != 0 ||
+			rs.MaxUnavailable == nil || rs.MaxUnavailable.IntValue() != 1 {
+			t.Fatalf("rolloutStrategy = %#v, want maxSurge 0, maxUnavailable 1", rs)
+		}
+	}
+
+	t.Run("gpu decode and prefill never surge", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{EnablePrefill: true}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		noSurge(t, got.Spec.RolloutStrategy)
+		noSurge(t, got.Spec.Prefill.RolloutStrategy)
+	})
+
+	t.Run("cpu profile keeps the default strategy", func(t *testing.T) {
+		t.Parallel()
+		got, err := buildLLMInferenceService(llmContext(t, nil, components.VllmCustomSpec{ComputeProfile: "cpu"}, llm.LlmTopologyParameters{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Spec.RolloutStrategy != nil {
+			t.Fatalf("cpu rolloutStrategy = %#v, want nil", got.Spec.RolloutStrategy)
 		}
 	})
 }

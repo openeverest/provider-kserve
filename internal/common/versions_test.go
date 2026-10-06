@@ -50,6 +50,19 @@ func TestCatalogMatchesChart(t *testing.T) {
 		t.Fatal("kserve-resources dependency not found in Chart.yaml")
 	}
 
+	// values.yaml may run a different image tag than the subchart version.
+	var values struct {
+		KServeResources struct {
+			KServe struct {
+				Version string `json:"version"`
+			} `json:"kserve"`
+		} `json:"kserveResources"`
+	}
+	readYAML(t, "../../charts/provider-kserve/values.yaml", &values)
+	if v := values.KServeResources.KServe.Version; v != "" {
+		chartKServe = v
+	}
+
 	var defaultBundle string
 	predictor := ""
 	bundles := 0

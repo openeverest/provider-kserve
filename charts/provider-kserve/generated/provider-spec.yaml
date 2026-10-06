@@ -5,8 +5,8 @@ spec:
     modelServer:
       versions:
         - default: true
-          image: kserve/kserve-controller:v0.20.0
-          version: 0.20.0
+          image: kserve/kserve-controller:v0.21.0
+          version: 0.21.0
     vllm:
       versions:
         - default: true
@@ -539,7 +539,7 @@ spec:
           componentsOrder:
             - externalAccess
             - tokenLimitPerHour
-          description: 'Configure how clients reach the model. Pick one external access path: a per-instance Service (ClusterIP / LoadBalancer / NodePort), or the shared Envoy AI Gateway (token metering and optional per-user quotas).'
+          description: 'Configure how clients reach the model. Pick one external access path: a per-instance Service (ClusterIP / LoadBalancer / NodePort), or the shared Envoy AI Gateway (API key per model, token metering and optional per-key quotas).'
           label: Routing
         runtime:
           components:
@@ -744,6 +744,10 @@ spec:
   versions:
     - components:
         llmEngine: 0.25.1
-        predictor: 0.20.0
+        predictor: 0.21.0
       default: true
+      name: "0.21"
+    - components:
+        llmEngine: 0.25.1
+        predictor: 0.21.0
       name: "0.20"

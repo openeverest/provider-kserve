@@ -56,6 +56,10 @@ const (
 
 	nvidiaGPUResource = corev1.ResourceName("nvidia.com/gpu")
 
+	// storageInitializerContainerName is KServe's model download init container;
+	// KServe merges a same-named init container in the pod template into it.
+	storageInitializerContainerName = "storage-initializer"
+
 	// gpuLibraryPathEnvVar / gpuLibraryPathValue add the NVIDIA driver lib dir to
 	// the compile-time linker search path for the GPU profile. See
 	// gpuLibraryPathEnv for the full rationale.
@@ -123,6 +127,11 @@ func validateLLM(c *controller.Context) error {
 	}
 	if topo.UsesAIGateway() && !common.AIGatewayEnabled() {
 		return fmt.Errorf("externalAccess EnvoyAIGateway requires aiGateway.enabled in the provider chart")
+	}
+	if topo.UsesAIGateway() {
+		if err := validateAIGatewayAccess(c, servedModelName(c.Name(), params.ModelName)); err != nil {
+			return err
+		}
 	}
 	if topo.TokenLimitPerHour != nil {
 		if !topo.UsesAIGateway() {
@@ -667,6 +676,9 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 
 	isCPUProfile := strings.EqualFold(params.ComputeProfile, computeProfileCPU)
 	effRes := withGPUCount(comp.Resources, params.GpuCount, isCPUProfile)
+	if !isCPUProfile {
+		spec.RolloutStrategy = gpuRolloutStrategy()
+	}
 
 	if params.WorkerCount != nil {
 		spec.Worker = buildWorkerPodSpec(overlayResources(effRes, params.WorkerResources), !isCPUProfile)
@@ -730,6 +742,17 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 	for _, name := range routingConfigRefs(topo) {
 		spec.BaseRefs = append(spec.BaseRefs, corev1.LocalObjectReference{Name: name})
 	}
+	// KServe only reports the InferencePool ready for Gateways reached through
+	// an HTTPRoute it knows, so reference the one the AI Gateway generates.
+	if topo.UsesAIGateway() {
+		spec.Router = &kservev1alpha2.RouterSpec{
+			Route: &kservev1alpha2.GatewayRoutesSpec{
+				HTTP: &kservev1alpha2.HTTPRouteSpec{
+					Refs: []corev1.LocalObjectReference{{Name: aiGatewayRouteName(c.Name())}},
+				},
+			},
+		}
+	}
 	for _, ref := range params.BaseRefs {
 		spec.BaseRefs = append(spec.BaseRefs, corev1.LocalObjectReference{Name: ref})
 	}
@@ -747,6 +770,9 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 
 	if topo.EnablePrefill {
 		prefill := &kservev1alpha2.WorkloadSpec{}
+		if !isCPUProfile {
+			prefill.RolloutStrategy = gpuRolloutStrategy()
+		}
 		if scale := prefillScaling(topo); scale.enabled() {
 			prefill.Scaling = buildScalingSpec(scale)
 		} else if topo.PrefillReplicas != nil {
@@ -782,6 +808,12 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		spec.Prefill = prefill
 	}
 
+	storageInitResources, err := common.StorageInitializerResources()
+	if err != nil {
+		return nil, err
+	}
+	applyStorageInitializerResources(&spec, params, storageInitResources)
+
 	// Distributed tracing. A present-but-empty TracingSpec enables KServe's
 	// default OTLP instrumentation; an endpoint override is applied when set.
 	if topo.EnableTracing {
@@ -799,6 +831,46 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		ObjectMeta: c.ObjectMeta(c.Name()),
 		Spec:       spec,
 	}, nil
+}
+
+// gpuRolloutStrategy replaces pods one at a time without surging: a surge pod
+// would wait for a GPU still held by the pod it replaces.
+func gpuRolloutStrategy() *kservev1alpha2.RolloutStrategy {
+	return &kservev1alpha2.RolloutStrategy{
+		MaxSurge:       ptr.To(intstr.FromInt32(0)),
+		MaxUnavailable: ptr.To(intstr.FromInt32(1)),
+	}
+}
+
+// applyStorageInitializerResources overrides the storage-initializer resources
+// in every pod KServe downloads the model into. Only hf:// and s3:// models get
+// it: for other schemes KServe adds no storage-initializer of its own, so the
+// override would remain as an image-less init container.
+func applyStorageInitializerResources(spec *kservev1alpha2.LLMInferenceServiceSpec, params components.VllmCustomSpec, res *corev1.ResourceRequirements) {
+	if res == nil || ptr.Deref(params.DisableStorageInitializer, false) {
+		return
+	}
+	if !strings.HasPrefix(params.ModelURI, "hf://") && !strings.HasPrefix(params.ModelURI, "s3://") {
+		return
+	}
+	if spec.Template == nil {
+		spec.Template = &corev1.PodSpec{}
+	}
+	pods := []*corev1.PodSpec{spec.Template, spec.Worker}
+	if spec.Prefill != nil {
+		if spec.Prefill.Template == nil {
+			spec.Prefill.Template = &corev1.PodSpec{}
+		}
+		pods = append(pods, spec.Prefill.Template, spec.Prefill.Worker)
+	}
+	for _, pod := range pods {
+		if pod != nil {
+			pod.InitContainers = append(pod.InitContainers, corev1.Container{
+				Name:      storageInitializerContainerName,
+				Resources: *res.DeepCopy(),
+			})
+		}
+	}
 }
 
 // syncLLM creates or updates the LLMInferenceService.
@@ -995,7 +1067,10 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 		// When the AI Gateway is enabled, connection details come from the
 		// Gateway's external address rather than the direct workload URL.
 		if topo.UsesAIGateway() {
-			details, waiting, err := aiGatewayConnectionDetails(c)
+			comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
+			var params components.VllmCustomSpec
+			c.TryDecodeComponentParameters(comp, &params)
+			details, waiting, err := aiGatewayConnectionDetails(c, servedModelName(c.Name(), params.ModelName))
 			if err != nil {
 				return controller.Status{}, err
 			}

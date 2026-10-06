@@ -7,9 +7,12 @@
 #     provider-kserve-ai-gateway -n __NAMESPACE__ \
 #     -o jsonpath='{.status.addresses[0].value}')"
 #
+#   export API_KEY="$(kubectl get secret ai-gateway-smollm-conn \
+#     -n __NAMESPACE__ -o jsonpath='{.data.password}' | base64 -d)"
+#
 #   curl "$GATEWAY_URL/v1/chat/completions" \
 #     -H 'Content-Type: application/json' \
-#     -H 'x-user-id: tilt-user' \
+#     -H "Authorization: Bearer $API_KEY" \
 #     -d '{"model":"smollm2-135m-instruct","messages":[{"role":"user","content":"Say hello in one sentence."}]}'
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance

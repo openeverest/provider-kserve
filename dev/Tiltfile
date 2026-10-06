@@ -273,6 +273,14 @@ local_resource(
     labels=['provider'],
 )
 
+# KServe CRDs are their own Helm releases, installed before the provider chart.
+local_resource(
+    'kserve-crds',
+    'make -C {0} helm-install-crds'.format(provider_dir),
+    deps=['{0}/charts/provider-kserve/Chart.yaml'.format(provider_dir)],
+    labels=['provider'],
+)
+
 # ===========================
 # Provider: Helm chart
 # ===========================
@@ -282,13 +290,13 @@ local_resource(
 # helm_resource also guarantees the Provider CR is applied only after the core
 # CRDs exist.
 #
-# First install: KServe CRDs (vendored into crds/, applied before templates) +
-# llmisvc controller. kserve-resources is off — its ClusterServingRuntimes and
+# First install: llmisvc controller (KServe CRDs come from the kserve-crds
+# resource above). kserve-resources is off — its ClusterServingRuntimes and
 # LLMInferenceServiceConfigs go through admission webhooks that are not ready
 # until the controllers are. Post-install turns kserve-resources on, then the
 # webhook-gated resources. cert-manager is its own release, bundled copy off.
 
-provider_resource_deps = ['provider-build', 'provider-helm-deps']
+provider_resource_deps = ['provider-build', 'provider-helm-deps', 'kserve-crds']
 if install_openeverest:
     provider_resource_deps = provider_resource_deps + ['openeverest', 'openeverest-crds']
 if install_cert_manager:
@@ -311,8 +319,10 @@ provider_flags = [
 if enable_ai_gateway:
     provider_flags = provider_flags + [
         '--set', 'aiGateway.enabled=true',
-        '--set', 'envoy-ai-gateway.envoyGateway.namespace={0}'.format(
-            provider_namespace),
+        '--set', 'envoy-gateway.enabled=true',
+        '--set', 'envoy-ai-gateway.enabled=true',
+        # The local gateway has no TLS; API keys are still required.
+        '--set', 'aiGateway.auth.allowInsecureHTTP=true',
     ]
 if enable_metrics:
     # Labeled ConfigMaps for kube-prometheus-stack Grafana sidecar (see
@@ -365,7 +375,7 @@ post_install_cmd = (
 ).format(ns=provider_namespace, chart=chart_dir)
 
 if enable_ai_gateway:
-    post_install_cmd = post_install_cmd + ' --set aiGateway.enabled=true --set envoy-ai-gateway.envoyGateway.namespace={0}'.format(provider_namespace)
+    post_install_cmd = post_install_cmd + ' --set aiGateway.enabled=true --set envoy-gateway.enabled=true --set envoy-ai-gateway.enabled=true --set aiGateway.auth.allowInsecureHTTP=true'
 
 if enable_metrics:
     post_install_cmd = post_install_cmd + ' --set metrics.grafanaDashboards.enabled=true --set metrics.grafanaDashboards.namespace=monitoring'

@@ -1,22 +1,7 @@
 {{- if .Values.aiGateway.enabled }}
-{{- if .Values.aiGateway.tls.enabled }}
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: {{ include "provider-kserve.aiGatewayName" . }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "provider-kserve.labels" . | nindent 4 }}
-spec:
-  secretName: {{ include "provider-kserve.aiGatewayTLSSecretName" . }}
-  dnsNames:
-    - {{ required "aiGateway.tls.hostname is required when AI Gateway TLS is enabled" .Values.aiGateway.tls.hostname | quote }}
-  issuerRef:
-    name: {{ required "aiGateway.tls.issuerRef.name is required when AI Gateway TLS is enabled" .Values.aiGateway.tls.issuerRef.name | quote }}
-    kind: {{ default "ClusterIssuer" .Values.aiGateway.tls.issuerRef.kind }}
-    group: {{ default "cert-manager.io" .Values.aiGateway.tls.issuerRef.group }}
----
-{{ end }}
+{{- if and .Values.aiGateway.auth.enabled (not .Values.aiGateway.tls.enabled) (not .Values.aiGateway.auth.allowInsecureHTTP) }}
+{{- fail "aiGateway.auth requires HTTPS: set aiGateway.tls.enabled=true (or aiGateway.auth.allowInsecureHTTP=true for local development)" }}
+{{- end }}
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyProxy
 metadata:
@@ -47,6 +32,22 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "provider-kserve.labels" . | nindent 4 }}
+  {{- if .Values.aiGateway.tls.enabled }}
+  # cert-manager creates the Certificate, so the chart needs no cert-manager CRDs at install.
+  {{- with .Values.aiGateway.tls.issuerRef }}
+  {{- $issuerName := required "aiGateway.tls.issuerRef.name is required when AI Gateway TLS is enabled" .name }}
+  {{- $issuerKind := default "ClusterIssuer" .kind }}
+  {{- $issuerGroup := default "cert-manager.io" .group }}
+  annotations:
+    {{- if and (eq $issuerKind "ClusterIssuer") (eq $issuerGroup "cert-manager.io") }}
+    cert-manager.io/cluster-issuer: {{ $issuerName | quote }}
+    {{- else }}
+    cert-manager.io/issuer: {{ $issuerName | quote }}
+    cert-manager.io/issuer-kind: {{ $issuerKind | quote }}
+    cert-manager.io/issuer-group: {{ $issuerGroup | quote }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
 spec:
   gatewayClassName: {{ include "provider-kserve.aiGatewayClassName" . }}
   infrastructure:
@@ -56,7 +57,7 @@ spec:
       name: {{ include "provider-kserve.aiGatewayName" . }}
   listeners:
     {{- if .Values.aiGateway.tls.enabled }}
-    - name: https
+    - name: {{ include "provider-kserve.aiGatewayListenerName" . }}
       hostname: {{ required "aiGateway.tls.hostname is required when AI Gateway TLS is enabled" .Values.aiGateway.tls.hostname | quote }}
       protocol: HTTPS
       port: 443
@@ -69,18 +70,50 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
+    {{- if .Values.aiGateway.tls.acmeHTTP01 }}
+    # Serves only cert-manager HTTP-01 challenges (created in this namespace).
+    # Model routes and API keys are bound to the HTTPS listener above.
+    - name: acme-http01
+      hostname: {{ .Values.aiGateway.tls.hostname | quote }}
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+    {{- end }}
     {{- else }}
-    - name: {{ .Values.aiGateway.scheme }}
+    - name: {{ include "provider-kserve.aiGatewayListenerName" . }}
       protocol: {{ .Values.aiGateway.listener.protocol }}
       port: {{ .Values.aiGateway.listener.port }}
       allowedRoutes:
         namespaces:
           from: All
     {{- end }}
+{{- if .Values.aiGateway.auth.enabled }}
 ---
-# The upstream AI Gateway chart defaults this binding to
-# envoy-gateway-system. Dependencies share this release namespace, so add the
-# equivalent binding for the bundled Envoy Gateway controller.
+# The provider renders the API key SecurityPolicy (<gateway>-api-keys). This
+# drops any client-supplied key ID header before authentication sets it.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: {{ include "provider-kserve.aiGatewayName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provider-kserve.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ include "provider-kserve.aiGatewayName" . }}
+  headers:
+    earlyRequestHeaders:
+      remove:
+        - x-openeverest-key-id
+{{- end }}
+{{- if (index .Values "envoy-gateway").enabled }}
+---
+# The upstream AI Gateway chart binds the Envoy Gateway service account in
+# envoy-gateway-system; the bundled Envoy Gateway runs in this namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -95,4 +128,5 @@ subjects:
   - kind: ServiceAccount
     name: envoy-gateway
     namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}

@@ -52,7 +52,7 @@ The latest release is `0.1.0`.
 
 | provider-kserve | OpenEverest | KServe | Kubernetes |
 |---|---|---|---|
-| `0.1.0` | `>= 2.0.0-dev.2` | `0.20.x` | `1.30` – `1.34` |
+| `0.1.0` | `>= 2.0.0-dev.2` | `0.21.x` | `1.30` – `1.36` |
 
 ## Capabilities
 
@@ -76,17 +76,21 @@ Models are pulled from the URI given in the component parameters (`hf://`, `s3:/
 
 > [!IMPORTANT]
 > **Prerequisites.** Besides an [OpenEverest](#what-this-is) installation, the KServe
-> controllers require **cert-manager** — they run admission webhooks whose certificates it
-> issues. The chart bundles cert-manager and installs it (with its CRDs) by default; when the
-> cluster already runs cert-manager, install with `--set cert-manager.enabled=false` to use the
-> existing one. Either way cert-manager **and its CRDs must be present** — unlike the KServe
-> CRDs, the chart does not vendor the cert-manager CRDs. See [KServe CRDs](#kserve-crds).
+> controllers require **cert-manager** (with its CRDs) — they run admission webhooks whose
+> certificates it issues. Install it before this chart. The chart can bundle it
+> (`cert-manager.enabled=true`), but that is off by default: most clusters already run
+> cert-manager, and a same-release install races its webhook against the KServe `Issuer` /
+> `Certificate`. See [KServe CRDs](#kserve-crds).
 
-Install the published chart from the GHCR OCI registry:
+Install the KServe CRDs (their own releases, see [KServe CRDs](#kserve-crds)), then the
+published chart from the GHCR OCI registry:
 
 ```bash
+for c in kserve-crd kserve-llmisvc-crd; do
+  helm upgrade --install $c oci://ghcr.io/kserve/charts/$c --version v0.21.0-rc1 -n everest-system
+done
 helm install provider-kserve \
-  oci://ghcr.io/openeverest/charts/provider-kserve
+  oci://ghcr.io/openeverest/charts/provider-kserve -n everest-system
 ```
 
 <details>
@@ -95,7 +99,8 @@ helm install provider-kserve \
 ```bash
 git clone https://github.com/openeverest/provider-kserve.git
 cd provider-kserve
-make helm-deps   # helm dependency update (adds the jetstack repo for cert-manager)
+make helm-deps           # helm dependency update (adds the jetstack repo for cert-manager)
+make helm-install-crds   # KServe CRD charts at the version pinned in Chart.yaml
 helm install provider-kserve charts/provider-kserve --namespace everest-system
 ```
 
@@ -104,15 +109,14 @@ helm install provider-kserve charts/provider-kserve --namespace everest-system
 
 - The KServe controllers are bundled as chart dependencies and installed by default — see
   [Bundled KServe controllers](#bundled-kserve-controllers).
-- cert-manager is bundled too, because both KServe controllers run admission webhooks. Set
-  `cert-manager.enabled=false` when the cluster already provides it.
+- cert-manager, Envoy Gateway and Envoy AI Gateway can be bundled too, but are off by default
+  so the chart never installs a second copy next to an existing one.
 
 > [!NOTE]
-> Installing cert-manager in the *same* Helm release as the resources that consume it can
-> race — the cert-manager webhook may not be ready when the KServe `Issuer` / `Certificate`
-> objects are admitted. If a first install fails on a cert-manager webhook error, either
-> re-run it or install cert-manager first with `cert-manager.enabled=false`. The dev
-> [Tiltfile](dev/Tiltfile) does the latter automatically.
+> If you set `cert-manager.enabled=true`, the cert-manager webhook may not be ready when the
+> KServe `Issuer` / `Certificate` objects are admitted. If a first install fails on a
+> cert-manager webhook error, re-run it. The dev [Tiltfile](dev/Tiltfile) installs
+> cert-manager as its own release instead.
 
 Uninstall:
 
@@ -120,9 +124,9 @@ Uninstall:
 helm uninstall provider-kserve --namespace everest-system
 ```
 
-Uninstalling the chart does **not** delete running `Instance` resources, and it does
-**not** delete the KServe CRDs (they are installed from the chart's `crds/` directory,
-which Helm never removes). See [KServe CRDs](#kserve-crds).
+Uninstalling the chart does **not** delete running `Instance` resources or the KServe CRDs,
+which belong to the `kserve-crd` / `kserve-llmisvc-crd` releases. See
+[KServe CRDs](#kserve-crds).
 
 ## Usage
 
@@ -186,10 +190,12 @@ For models that do not fit on one node, see [Serve a model that does not fit on 
 <!-- BEGIN GENERATED: versions -->
 | Version bundle | Default | llmEngine (vLLM) | predictor (KServe) |
 |---|---|---|---|
-| `0.20` | ✅ | `0.25.1` | `0.20.0` |
+| `0.21` | ✅ | `0.25.1` | `0.21.0` |
+| `0.20` | | `0.25.1` | `0.21.0` |
 
-One bundle, matching the single set of KServe controllers the chart installs. The
-llmEngine version is the CPU profile's vLLM build; the bundled GPU presets run
+One set of KServe controllers is installed by the chart. `0.20` is kept only so Instances
+created before the KServe v0.21 upgrade (which froze that name) keep reconciling; they run on
+0.21. The llmEngine version is the CPU profile's vLLM build; the bundled GPU presets run
 KServe's own runtime image and are not selectable here.
 <!-- END GENERATED: versions -->
 
@@ -242,7 +248,7 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 | `externalAccess` | string | Client access path: `ClusterIP`, `LoadBalancer`, `NodePort`, or `EnvoyAIGateway`. Takes precedence over `enableAIGateway` and `llmEngine.service.serviceType`. |
 | `enableGatewayRouting` | bool | Provision a Gateway API route plus Inference Gateway scheduler (Endpoint Picker) for prefix-cache aware routing. |
 | `enableAIGateway` | bool | Legacy alias for `externalAccess: EnvoyAIGateway` when `externalAccess` is unset. |
-| `tokenLimitPerHour` | int32 | Per-user, per-model hourly token quota. Only valid with Envoy AI Gateway. Defaults to 1000 when a Redis/Valkey rate-limit backend is configured. |
+| `tokenLimitPerHour` | int32 | Per-API-key, per-model hourly token quota. Only valid with Envoy AI Gateway. Defaults to 1000 when a Redis/Valkey rate-limit backend is configured. |
 | `enablePrefill` | bool | Enable disaggregated serving with a separate prefill workload. |
 | `prefillReplicas` | int32 | Static replicas for the prefill workload (when `enablePrefill` is true). Ignored when prefill min/max are set. |
 | `prefillMinReplicas` | int32 | Prefill WVA floor (≥ 1). Enables `spec.prefill.scaling`. Requires `enablePrefill`. |
@@ -289,21 +295,36 @@ curl http://localhost:8000/v1/models
 
 The normal `llm` path publishes KServe's direct URL and can still be consumed with the
 port-forward workflow. Envoy AI Gateway is an independent, opt-in access path that gives all
-opted-in models one OpenAI-compatible entry point, token metering, and optional per-user
-token quotas.
+opted-in models one OpenAI-compatible entry point, per-model API keys, token metering, and
+optional per-key token quotas.
 
-Enable the bundled controllers and shared `LoadBalancer` Gateway:
+Enable the shared `LoadBalancer` Gateway, and the bundled controllers unless the cluster
+already runs Envoy Gateway / Envoy AI Gateway:
 
 ```yaml
 # values.yaml
 aiGateway:
   enabled: true
+  tls:
+    enabled: true
+    hostname: llm.example.com
+    issuerRef:
+      name: letsencrypt-prod
+envoy-gateway:
+  enabled: true        # false when Envoy Gateway already runs (see below)
+envoy-ai-gateway:
+  enabled: true        # false when Envoy AI Gateway already runs
 ```
 
-TLS is optional and exposes the shared Gateway over HTTPS on port 443 using a cert-manager
-`Issuer` or `ClusterIssuer`. See the [Envoy AI Gateway TLS guide](docs/ai-gateway-tls.md) for
-DNS-01 production setup, Let's Encrypt staging, cloud DNS providers, and local self-signed
-tests.
+When you bring your own Envoy Gateway (v1.5+), it must carry the AI Gateway extension-manager
+config from `envoy-gateway.config` in [values.yaml](charts/provider-kserve/values.yaml).
+
+API keys (`aiGateway.auth.enabled`, on by default) require HTTPS, so the chart refuses to render
+without `aiGateway.tls` unless `aiGateway.auth.allowInsecureHTTP=true` is set for local
+development. See the [Envoy AI Gateway TLS guide](docs/ai-gateway-tls.md) for DNS-01 production
+setup, Let's Encrypt staging, cloud DNS providers, and local self-signed tests. For a complete
+walkthrough (cert-manager, OpenEverest, provider, domain, quotas, first model) see
+[docs/ai-gateway-setup.md](docs/ai-gateway-setup.md).
 
 Then enable it on an Instance:
 
@@ -323,18 +344,30 @@ routes directly to the `InferencePool` generated by `LLMInferenceService`. It do
 an `AIServiceBackend`; that resource is for the classic `InferenceService` Service backend and
 would bypass KServe's LLM endpoint picker.
 
-When the Gateway receives an external address, that base URL replaces the direct KServe URL in
-the Instance connection details. Send requests to the standard endpoint:
+When the Gateway receives an external address, that base URL (ending in `/v1`, ready to use as
+the OpenAI `base_url`) replaces the direct KServe URL in the Instance connection details.
+
+Each Instance gets a random API key, generated once and kept for the life of the Instance like a
+database password. The connection details show it as `password` (with the key ID as
+`username` and the served model name as `model`). Send it as a Bearer token, or in `x-api-key`
+for Anthropic-style clients:
 
 ```bash
 curl "$GATEWAY_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -H 'x-user-id: user123' \
+  -H "Authorization: Bearer $API_KEY" \
   -d '{
     "model": "llama-3.1-8b-instruct",
     "messages": [{"role": "user", "content": "Hello"}]
   }'
 ```
+
+A missing or unknown key returns HTTP 401; a valid key for a different model returns HTTP 403.
+The key is removed with the Instance, and kept (but inactive) when the Instance stops using the
+Gateway. To rotate it, delete the `<instance>-ai-gateway-key` Secret; the provider generates a
+new one. Served model names must be unique across the Gateway because keys are authorized per
+model name. Keys are stored in labeled Secrets whose layout matches Authorino's API key format,
+so a later move to Kuadrant can reuse them.
 
 Token metering is always configured on AI routes. Global quota enforcement also needs an
 existing Redis-compatible service. Configure its address in the Envoy Gateway subchart values:
@@ -351,10 +384,10 @@ envoyGateway:
 ```
 
 When the URL is omitted, no `BackendTrafficPolicy` is created. When configured, the quota is
-keyed by both `x-user-id` and model, request cost is zero, and the response's
+keyed by both the API key ID and model (by the client-supplied `x-user-id` when
+`aiGateway.auth.enabled=false`), request cost is zero, and the response's
 `llm_total_token` metadata is charged. Exhausted quotas return HTTP 429. Gateway TLS does not
-add API-key authentication or backend TLS; configure those separately before exposing the
-endpoint to untrusted networks.
+add backend TLS; configure that separately if traffic to the model pods must be encrypted.
 
 ### Model catalog
 
@@ -559,6 +592,16 @@ external address across different environments:
 - **GPU cloud** (CoreWeave, Lambda, RunPod) — varies by provider
 - **Local development** (k3d, kind, minikube) — MetalLB or `minikube tunnel`
 
+### Model pods: downloads and rollouts
+
+`storageInitializer.resources` (chart value, default `{}` = KServe's 1 CPU / 1Gi) sets the
+resources of the init container that downloads `hf://` / `s3://` models for every `llm`
+Instance. Raise the memory limit when multi-GB downloads are OOM-killed.
+
+GPU `llm` Instances roll out with `rolloutStrategy: {maxSurge: 0, maxUnavailable: 1}`: pods are
+replaced one at a time without a surge pod, which would wait for a GPU still held by the pod it
+replaces. With one replica this means a short outage per rollout.
+
 ### Observability
 
 Each `llm` Instance gets a `PodMonitor` so an existing Prometheus Operator scrapes vLLM's
@@ -581,10 +624,14 @@ reconcile them. The controllers that do are bundled as Helm subchart dependencie
 | `kserve-resources` | `InferenceService` (predictor) | `kserveResources.enabled` |
 | `kserve-llmisvc-resources` | `LLMInferenceService` (llm) | `kserveLlmisvcResources.enabled` |
 | `kserve-runtime-configs` | `ClusterServingRuntime`s (predictor) | `kserveRuntimeConfigs.enabled` |
-| `cert-manager` | webhook certificates for both | `cert-manager.enabled` |
+| `cert-manager` | webhook certificates for both | `cert-manager.enabled` (off by default) |
+| `lws` | LeaderWorkerSet, for multi-node `llm` Instances (`workerCount`) | `lws.enabled` (off by default) |
 
-The KServe CRDs are **not** subchart dependencies — they are vendored into the chart's
-`crds/` directory (see [KServe CRDs](#kserve-crds)).
+Helm installs a subchart's CRDs only on `helm install`. When you turn on `lws`,
+`envoy-gateway` or `envoy-ai-gateway` later with `helm upgrade`, apply their CRDs first, for
+example `helm show crds oci://registry.k8s.io/lws/charts/lws --version 0.8.0 | kubectl apply --server-side -f -`.
+
+The KServe CRDs are **not** part of this chart (see [KServe CRDs](#kserve-crds)).
 
 The `kserve-runtime-configs` chart ships the `ClusterServingRuntime`s the InferenceService
 controller selects from by model format — without them the `predictor` topology has no runtime
@@ -613,46 +660,63 @@ make helm-deps   # helm dependency update (adds the jetstack repo for cert-manag
 
 ## KServe CRDs
 
-Installing the provider chart also installs the KServe CustomResourceDefinitions the provider
-translates `Instance`s into (`InferenceService`, `LLMInferenceService`, and their supporting
-kinds). `make helm-deps` vendors them from the `kserve-crd` and `kserve-llmisvc-crd` charts —
-pinned to the same version as the controller charts in
-[`Chart.yaml`](charts/provider-kserve/Chart.yaml) — into the chart's `crds/` directory.
-
-Helm installs `crds/` **before** rendering any templates, so a single `helm install`
-can create the CRs this chart ships (`ClusterServingRuntime`, `ClusterStorageContainer`,
-`LLMInferenceServiceConfig`). Keeping them out of `templates/` is deliberate: Helm renders a
-subchart's templates in the same pass as those CRs, which fails on a fresh cluster with
-`resource mapping not found ... ensure CRDs are installed first`.
-
-The `crds/` mechanism has trade-offs to know about:
-
-- `helm uninstall` does **not** delete the CRDs (or the objects of those kinds). They are
-  left in place.
-- `helm upgrade` does **not** update the CRD schemas. When you bump the KServe version,
-  apply the new CRDs out of band with `kubectl apply -f charts/provider-kserve/crds/`
-  (or `--server-side`) after `make helm-deps`.
-- Skip installing them with `--skip-crds` when the cluster already has the CRDs (shared
-  cluster or BYO-KServe):
+The KServe CustomResourceDefinitions the provider translates `Instance`s into
+(`InferenceService`, `LLMInferenceService`, and their supporting kinds) come from KServe's own
+`kserve-crd` and `kserve-llmisvc-crd` charts, installed as **separate releases before** the
+provider chart, at the version pinned in [`Chart.yaml`](charts/provider-kserve/Chart.yaml):
 
 ```bash
-helm install provider-kserve oci://ghcr.io/openeverest/charts/provider-kserve \
-  --version 0.1.0 --namespace everest-system --skip-crds
+make helm-install-crds   # or the helm loop in Installation
+```
+
+Why not inside the provider chart: together with the bundled controllers and gateways they push
+the provider's Helm release past Kubernetes' 1 MiB Secret limit, and Helm never upgrades CRDs
+from a chart's `crds/` directory. As separate releases they upgrade with `helm upgrade` (run
+`make helm-install-crds` again after bumping the KServe version), and `helm uninstall` of the
+provider leaves them in place. Skip them when the cluster already has the KServe CRDs.
+
+**Or let the provider chart fetch them** (`kserveCRDs.install=true`): a pre-install/pre-upgrade
+hook Job renders the same two charts from `kserveCRDs.registry` (default `oci://ghcr.io/kserve/charts`,
+at the bundled KServe version) and server-side applies them before anything else in the release,
+on every install and upgrade. Use this or the separate releases, not both.
+
+- The cluster needs egress to the registry (or point `kserveCRDs.registry` at a mirror).
+- Helm checks every kind in the release before it runs hooks, so the **first** install must not
+  render KServe objects yet: enable the hook in pass a) of the three-pass install
+  ([docs/ai-gateway-setup.md](docs/ai-gateway-setup.md#4-provider-chart)), which renders none.
+- On an existing release use `--reset-then-reuse-values` (not `--reuse-values`), so the new
+  `kserveCRDs` defaults are picked up.
+- Switching from the separate releases: drop their Helm records only, never `helm uninstall`
+  them (that deletes the CRDs and every model):
+  `kubectl -n <ns> delete secret -l 'owner=helm,name in (kserve-crd,kserve-llmisvc-crd)'`.
+
+**Migrating** a release whose CRDs came from the old `crds/` directory: let the CRD charts adopt
+the existing CRDs before installing them.
+
+```bash
+NS=everest-system
+adopt() {
+  kubectl annotate crd "$2" meta.helm.sh/release-name="$1" meta.helm.sh/release-namespace=$NS --overwrite
+  kubectl label crd "$2" app.kubernetes.io/managed-by=Helm --overwrite
+}
+for crd in llminferenceservices llminferenceserviceconfigs; do adopt kserve-llmisvc-crd $crd.serving.kserve.io; done
+for crd in inferenceservices inferencegraphs servingruntimes clusterservingruntimes \
+           trainedmodels clusterstoragecontainers; do adopt kserve-crd $crd.serving.kserve.io; done
 ```
 
 > [!NOTE]
 > The cert-manager CRDs are **not** bundled. The KServe controllers' `Certificate`
-> resources require them, so install cert-manager (with its CRDs) before, or alongside
-> with, this chart.
+> resources require them, so install cert-manager (with its CRDs) before this chart.
 
-The `LLMInferenceServiceConfig` presets are still vendored by `make sync-llm-presets`
-into `files/llmisvcconfigs/`. When you bump the KServe version, bump the three KServe
-controller entries in `Chart.yaml` together (`sync-kserve-crds` pulls the matching CRDs)
-and re-run `make generate` for the preset file.
+The `LLMInferenceServiceConfig` presets are vendored by `make sync-llm-presets` (part of
+`make generate`) into `files/llmisvcconfigs/`, from the `kserve-runtime-configs` chart at the
+pinned version. When you bump the KServe version, bump the three KServe controller entries in
+`Chart.yaml` together, then:
 
 ```bash
-make helm-deps         # vendor the CRDs into crds/ and the controller charts into charts/
-make sync-llm-presets  # refresh charts/provider-kserve/files/ from $(KSERVE_CHARTS)
+make helm-deps           # the controller charts into charts/
+make generate            # presets and generated spec
+make helm-install-crds   # matching CRDs on the cluster
 ```
 
 ## Development
@@ -737,9 +801,11 @@ kubectl logs -n everest-system deploy/provider-kserve -f
 | `unsupported topology ""` | `spec.topology.type` is required — set `llm` or `predictor` |
 | `ConfigNotFound: kserve-config-llm-template` | The LLM presets are missing; keep `llmPresets.enabled=true` |
 | `predictor` instance has no runtime | `kserve-runtime-configs` must be installed |
-| Install fails on a cert-manager webhook error | Re-run, or install cert-manager first with `cert-manager.enabled=false` |
+| Install fails on a cert-manager webhook error | Re-run, or install cert-manager as its own release first and keep `cert-manager.enabled=false` |
 | CPU model fails with "less than desired CPU memory utilization" | Raise the memory limit or lower `--gpu-memory-utilization` — see [CPU memory sizing](#cpu-memory-sizing) |
 | Gated model download fails | Create the `HF_TOKEN` secret and set `huggingface.tokenSecretName` |
+| `llm` model pod `Init:OOMKilled` | Raise `storageInitializer.resources.limits.memory` (KServe defaults to 1Gi) |
+| New `llm` model pod `Pending` with `Insufficient nvidia.com/gpu` after a change | The old pod holds the GPU; GPU Instances roll out without surge, so check the `computeProfile` is `gpu` |
 
 ## Contributing
 

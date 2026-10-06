@@ -36,7 +36,7 @@ providers, and on-prem GPU infrastructure.
 flowchart TD
     client["External Client<br/>HTTPS request to $GATEWAY_URL/v1/..."]
     lb["Cloud or on-prem LoadBalancer<br/>External IP or DNS name<br/>HTTPS :443"]
-    gateway["Envoy AI Gateway<br/>provider-kserve-ai-gateway<br/><br/>Terminates client TLS<br/>Reads the OpenAI request<br/>Derives x-ai-eg-model<br/>Meters tokens<br/>Applies per-user rate limits using x-user-id"]
+    gateway["Envoy AI Gateway<br/>provider-kserve-ai-gateway<br/><br/>Terminates client TLS<br/>Checks the API key<br/>Reads the OpenAI request<br/>Derives x-ai-eg-model<br/>Allows each key only its model<br/>Meters tokens<br/>Applies per-key rate limits"]
     route["AIGatewayRoute<br/>Matches the requested model<br/>Selects the model's InferencePool"]
     picker["InferencePool endpoint picker<br/>Tracks healthy model replicas<br/>Selects a vLLM endpoint"]
     workload["vLLM GPU workload<br/>KServe-managed model pods<br/>Receives cluster-internal HTTP traffic"]
@@ -51,7 +51,14 @@ flowchart TD
 **Key:** There is one shared Gateway (`LoadBalancer`) per provider installation.
 Each model Instance with `enableAIGateway: true` registers an `AIGatewayRoute`
 on that Gateway. Multi-tenancy is achieved through header-based routing
-(`x-ai-eg-model`) and per-user token quotas (`x-user-id`).
+(`x-ai-eg-model`), a generated API key per model (shown as the Instance
+connection password), and per-key token quotas.
+
+> [!NOTE]
+> `aiGateway.enabled=true` creates the shared Gateway but does not install the
+> controllers. The `helm install` examples below assume Envoy Gateway and Envoy
+> AI Gateway already run in the cluster; otherwise add
+> `--set envoy-gateway.enabled=true --set envoy-ai-gateway.enabled=true`.
 
 ---
 
@@ -87,10 +94,12 @@ and the provider publishes it in the Instance connection details:
 export GATEWAY_URL="http://$(kubectl get gateway \
   provider-kserve-ai-gateway \
   -o jsonpath='{.status.addresses[0].value}')"
+export API_KEY="$(kubectl get secret <instance>-conn \
+  -o jsonpath='{.data.password}' | base64 -d)"
 
 curl "$GATEWAY_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -H 'x-user-id: user123' \
+  -H "Authorization: Bearer $API_KEY" \
   -d '{"model":"llama-3.1-8b-instruct","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
@@ -607,15 +616,17 @@ kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name
 # NAME                                                 TYPE           EXTERNAL-IP
 # envoy-default-provider-kserve-ai-gateway-233f5692    LoadBalancer   34.123.45.67
 
-# 4. Set the gateway URL
+# 4. Set the gateway URL and the model's API key
 export GATEWAY_URL="http://$(kubectl get gateway \
   provider-kserve-ai-gateway \
   -o jsonpath='{.status.addresses[0].value}')"
+export API_KEY="$(kubectl get secret ai-gateway-smollm-conn \
+  -o jsonpath='{.data.password}' | base64 -d)"
 
 # 5. Send a test request
 curl -s "$GATEWAY_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -H 'x-user-id: test-user' \
+  -H "Authorization: Bearer $API_KEY" \
   -d '{
     "model": "smollm2-135m-instruct",
     "messages": [{"role": "user", "content": "Say hello in one sentence."}],
@@ -625,7 +636,7 @@ curl -s "$GATEWAY_URL/v1/chat/completions" \
 # 6. Check token metering (if rate limiting is configured)
 curl -s "$GATEWAY_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -H 'x-user-id: test-user' \
+  -H "Authorization: Bearer $API_KEY" \
   -d '{
     "model": "smollm2-135m-instruct",
     "messages": [{"role": "user", "content": "Count to 100."}],

@@ -30,6 +30,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := provider.SetupGatewayAuth(r.GetManager()); err != nil {
+		l.Error(err, "unable to set up AI Gateway auth controller")
+		os.Exit(1)
+	}
+
 	if err := r.Start(ctx); err != nil {
 		l.Error(err, "unable to start reconciler")
 		os.Exit(1)

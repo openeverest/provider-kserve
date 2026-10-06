@@ -42,7 +42,7 @@ type LlmTopologyParameters struct {
 	// Legacy alias for ExternalAccess=EnvoyAIGateway when ExternalAccess is unset.
 	EnableAIGateway bool `json:"enableAIGateway,omitempty"`
 
-	// TokenLimitPerHour is the per-user token quota for this model. It is used
+	// TokenLimitPerHour is the per-API-key token quota for this model. It is used
 	// only when the Envoy AI Gateway is selected and the provider has a
 	// Redis-compatible rate-limit backend configured. Zero/unset uses the
 	// default limit.
