@@ -545,3 +545,12 @@ envoy-ai-gateway:
 
 envoy-ai-gateway-crds: {}
 
+# LeaderWorkerSet controller, required for multi-node llm Instances
+# (workerCount + pipelineParallelSize). Off by default: its webhook
+# configurations are cluster-scoped, so it cannot sit next to an existing LWS.
+# Its CRD is installed only by `helm install`; apply it first if you enable this
+# with `helm upgrade`.
+lws:
+  # -- Install the LeaderWorkerSet controller and CRD into the release namespace
+  enabled: false
+

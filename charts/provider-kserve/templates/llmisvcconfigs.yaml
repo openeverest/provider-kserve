@@ -14,7 +14,12 @@
   helper). The templating markers embedded in the presets are KServe controller
   templates rendered at reconcile time, not Helm templates, so .Files.Get emits
   them literally without evaluation.
+
+  worker-pipeline-parallel.yaml is maintained here, not synced: KServe has no
+  multi-node pipeline-parallel preset.
 */}}
 {{- if .Values.llmPresets.enabled }}
 {{ .Files.Get "files/llmisvcconfigs/resources.yaml" | replace "namespace: kserve\n" (printf "namespace: %s\n" .Release.Namespace) }}
+---
+{{ .Files.Get "files/llmisvcconfigs/worker-pipeline-parallel.yaml" | replace "namespace: kserve\n" (printf "namespace: %s\n" .Release.Namespace) }}
 {{- end }}

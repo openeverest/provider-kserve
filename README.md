@@ -617,6 +617,11 @@ reconcile them. The controllers that do are bundled as Helm subchart dependencie
 | `kserve-llmisvc-resources` | `LLMInferenceService` (llm) | `kserveLlmisvcResources.enabled` |
 | `kserve-runtime-configs` | `ClusterServingRuntime`s (predictor) | `kserveRuntimeConfigs.enabled` |
 | `cert-manager` | webhook certificates for both | `cert-manager.enabled` (off by default) |
+| `lws` | LeaderWorkerSet, for multi-node `llm` Instances (`workerCount`) | `lws.enabled` (off by default) |
+
+Helm installs a subchart's CRDs only on `helm install`. When you turn on `lws`,
+`envoy-gateway` or `envoy-ai-gateway` later with `helm upgrade`, apply their CRDs first, for
+example `helm show crds oci://registry.k8s.io/lws/charts/lws --version 0.8.0 | kubectl apply --server-side -f -`.
 
 The KServe CRDs are **not** subchart dependencies — they are vendored into the chart's
 `crds/` directory (see [KServe CRDs](#kserve-crds)).

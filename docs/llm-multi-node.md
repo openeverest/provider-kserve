@@ -8,8 +8,23 @@ This is **not** “more traffic → more copies.” That is `replicas` or WVA mi
 Here, several machines hold **pieces of the same model**. If one worker dies, that
 model is down.
 
-KServe implements this as a **head + workers** layout (`LLMInferenceService.spec.worker`).
-The cluster must already run KServe’s multi-node path (LeaderWorkerSet).
+KServe implements this as a **head + workers** layout (`LLMInferenceService.spec.worker`)
+on a LeaderWorkerSet: one group of pods per replica, the head serving the API.
+
+Prerequisites:
+
+- **LeaderWorkerSet** in the cluster. Either let the chart install it
+  (`lws.enabled=true`, LWS v0.8.0, the version KServe v0.20 is built against) or
+  bring your own:
+  `kubectl apply --server-side -f https://github.com/kubernetes-sigs/lws/releases/download/v0.8.0/manifests.yaml`.
+  Restart `llmisvc-controller-manager` if LWS is installed after it started.
+- The pipeline-parallel preset (`kserve-config-llm-worker-pipeline-parallel`).
+  KServe does not ship it; this chart does (with `llmPresets.enabled`). It runs
+  vLLM's native multi-node mode (no Ray): the head is node rank 0 and serves the
+  API, workers join it headless. Pods must reach each other on the pod network
+  (port 29501 and NCCL ports).
+- `storageInitializer.resources` large enough to download the model: every pod
+  in the group downloads the full model.
 
 ## Tensor parallelism vs workers vs replicas
 
@@ -82,6 +97,31 @@ Rules the provider checks:
 One replica (or one WVA step) is **the whole ring**, not one extra GPU. Two
 replicas means two heads and two worker sets.
 
+Verified example: Qwen2.5-7B across two nodes with one GPU each (20 GB),
+pipeline stage 0 on the head, stage 1 on the worker, served through the AI
+Gateway:
+
+```yaml
+  topology:
+    type: llm
+    parameters:
+      externalAccess: EnvoyAIGateway
+  components:
+    llmEngine:
+      type: vllm
+      replicas: 1
+      resources:
+        requests: { cpu: "3", memory: 16Gi }
+        limits: { memory: 16Gi }
+      parameters:
+        modelURI: hf://Qwen/Qwen2.5-7B-Instruct
+        modelName: qwen2.5-7b-instruct
+        gpuCount: 1               # per pod
+        tensorParallelSize: 1
+        pipelineParallelSize: 2
+        workerCount: 1
+```
+
 ## Prefill
 
 If you split prefill and decode (`enablePrefill: true`), prefill can have its own
@@ -123,4 +163,9 @@ longer while every node in the ring loads. After that it is one logical model.
 - GPU limit smaller than `tensorParallelSize`
 - Worker resources set without `workerCount`
 - Nodes do not have enough GPUs for **each** pod in the ring
-- LeaderWorkerSet CRD / KServe multi-node not installed on the cluster
+- LeaderWorkerSet not installed, or installed after `llmisvc-controller-manager`
+  started (restart it)
+- `ConfigNotFound: kserve-config-llm-worker-pipeline-parallel`: `llmPresets.enabled`
+  is off
+- If any pod in the ring restarts, LWS recreates the whole group (and the model
+  is downloaded again)
