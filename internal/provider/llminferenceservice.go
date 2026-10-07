@@ -1061,6 +1061,10 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 
 	ready := llmisvc.Status.GetCondition(apis.ConditionReady)
 	if ready != nil && ready.IsTrue() {
+		if waiting := unservedWorkload(llmisvc.Status.Workloads); waiting != "" {
+			return controller.Provisioning(waiting), nil
+		}
+
 		var topo llm.LlmTopologyParameters
 		c.TryDecodeTopologyParameters(&topo)
 
@@ -1093,6 +1097,22 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 	}
 
 	return controller.Provisioning(conditionMessage(ready, "LLMInferenceService is being created")), nil
+}
+
+// unservedWorkload names the first model workload without a ready pod. KServe
+// derives Ready from the Deployment's Available condition, which tolerates
+// maxUnavailable: with the GPU rollout (maxUnavailable 1) a single-replica
+// model is "Available" before its pod has even started.
+func unservedWorkload(ws *kservev1alpha2.WorkloadStatus) string {
+	if ws == nil {
+		return ""
+	}
+	for _, w := range []*kservev1alpha2.ObservedWorkloadStatus{ws.Primary, ws.Prefill} {
+		if w != nil && ptr.Deref(w.ReadyReplicas, 0) == 0 {
+			return fmt.Sprintf("Waiting for %s %s to have a ready pod", w.Kind, w.Name)
+		}
+	}
+	return ""
 }
 
 // llmConnectionDetails resolves how to reach a Ready model based on its expose

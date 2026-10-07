@@ -887,3 +887,45 @@ func TestBuildLLMInferenceServiceRolloutStrategy(t *testing.T) {
 		}
 	})
 }
+
+func TestUnservedWorkload(t *testing.T) {
+	t.Parallel()
+	observed := func(kind, name string, ready *int32) *kservev1alpha2.ObservedWorkloadStatus {
+		return &kservev1alpha2.ObservedWorkloadStatus{
+			TypedLocalObjectReference: corev1.TypedLocalObjectReference{Kind: kind, Name: name},
+			ReadyReplicas:             ready,
+		}
+	}
+	tests := []struct {
+		name string
+		ws   *kservev1alpha2.WorkloadStatus
+		want string
+	}{
+		{name: "no workload status trusts Ready", ws: nil, want: ""},
+		{name: "primary has a ready pod", ws: &kservev1alpha2.WorkloadStatus{
+			Primary: observed("Deployment", "m-kserve", ptr.To[int32](1)),
+		}, want: ""},
+		{name: "primary has no ready pod", ws: &kservev1alpha2.WorkloadStatus{
+			Primary: observed("Deployment", "m-kserve", ptr.To[int32](0)),
+		}, want: "Waiting for Deployment m-kserve to have a ready pod"},
+		{name: "primary not observed yet", ws: &kservev1alpha2.WorkloadStatus{
+			Primary: observed("LeaderWorkerSet", "m-kserve-mn", nil),
+		}, want: "Waiting for LeaderWorkerSet m-kserve-mn to have a ready pod"},
+		{name: "prefill has no ready pod", ws: &kservev1alpha2.WorkloadStatus{
+			Primary: observed("Deployment", "m-kserve", ptr.To[int32](1)),
+			Prefill: observed("Deployment", "m-kserve-prefill", ptr.To[int32](0)),
+		}, want: "Waiting for Deployment m-kserve-prefill to have a ready pod"},
+		{name: "scheduler is not a model workload", ws: &kservev1alpha2.WorkloadStatus{
+			Primary:   observed("Deployment", "m-kserve", ptr.To[int32](1)),
+			Scheduler: observed("Deployment", "m-kserve-router-scheduler", ptr.To[int32](0)),
+		}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := unservedWorkload(tt.ws); got != tt.want {
+				t.Fatalf("unservedWorkload() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
