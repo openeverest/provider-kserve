@@ -11,6 +11,8 @@ package provider
 // +kubebuilder:rbac:groups=core.openeverest.io,resources=providers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// The runtime counts the labelled component pods into Instance status.components.
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 
 // =============================================================================
 // PROVIDER-SPECIFIC RBAC — KServe serving resources.

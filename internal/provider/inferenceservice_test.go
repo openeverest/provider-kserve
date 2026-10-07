@@ -32,6 +32,14 @@ func predictorContext(t *testing.T, cl client.Client, comp corev1alpha1.Componen
 	return controller.NewContext(context.Background(), cl, inst, common.ProviderName)
 }
 
+func predictorPodLabels() map[string]any {
+	return map[string]any{
+		controller.ProviderLabel:  common.ProviderName,
+		controller.InstanceLabel:  "iris",
+		controller.ComponentLabel: common.ComponentPredictor,
+	}
+}
+
 func TestBuildInferenceService(t *testing.T) {
 	t.Run("maps parameters to KServe field paths", func(t *testing.T) {
 		c := predictorContext(t, nil, corev1alpha1.ComponentSpec{
@@ -63,6 +71,7 @@ func TestBuildInferenceService(t *testing.T) {
 			"predictor": map[string]any{
 				"minReplicas": int64(2),
 				"maxReplicas": int64(4),
+				"labels":      predictorPodLabels(),
 				"model": map[string]any{
 					"modelFormat":    map[string]any{"name": "sklearn"},
 					"runtime":        "kserve-sklearnserver",
@@ -88,7 +97,8 @@ func TestBuildInferenceService(t *testing.T) {
 		}
 		want := map[string]any{
 			"predictor": map[string]any{
-				"model": map[string]any{"modelFormat": map[string]any{"name": "onnx"}},
+				"labels": predictorPodLabels(),
+				"model":  map[string]any{"modelFormat": map[string]any{"name": "onnx"}},
 			},
 		}
 		if !reflect.DeepEqual(isvc.Object["spec"], want) {

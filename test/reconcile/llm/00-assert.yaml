@@ -10,6 +10,10 @@ metadata:
   name: test-kserve-llm
 spec:
   replicas: 1
+  # Pod labels the runtime counts into the Instance's status.components.
+  labels:
+    core.openeverest.io/instance: test-kserve-llm
+    core.openeverest.io/component: llmEngine
   model:
     uri: hf://meta-llama/Llama-3.1-8B-Instruct
     name: llama-3.1-8b-instruct

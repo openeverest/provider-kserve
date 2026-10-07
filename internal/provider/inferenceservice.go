@@ -30,9 +30,10 @@ type inferenceServiceSpec struct {
 }
 
 type predictorSpec struct {
-	MinReplicas *int32     `json:"minReplicas,omitempty"`
-	MaxReplicas int32      `json:"maxReplicas,omitempty"`
-	Model       *modelSpec `json:"model,omitempty"`
+	MinReplicas *int32            `json:"minReplicas,omitempty"`
+	MaxReplicas int32             `json:"maxReplicas,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Model       *modelSpec        `json:"model,omitempty"`
 }
 
 type modelSpec struct {
@@ -91,6 +92,7 @@ func buildInferenceService(c *controller.Context) (*unstructured.Unstructured, e
 		RuntimeVersion: params.RuntimeVersion,
 		Resources:      comp.Resources,
 	}}
+	predictor.Labels = c.PodLabels(common.ComponentPredictor)
 
 	switch {
 	case params.MinReplicas != nil:

@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"maps"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -334,6 +336,30 @@ func TestBuildLLMInferenceServiceScaling(t *testing.T) {
 			t.Fatalf("prefill scaling = %#v", got.Spec.Prefill.Scaling)
 		}
 	})
+}
+
+func TestBuildLLMInferenceServicePodLabels(t *testing.T) {
+	t.Parallel()
+	c := llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{EnablePrefill: true})
+	got, err := buildLLMInferenceService(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]string{
+		controller.ProviderLabel:  common.ProviderName,
+		controller.InstanceLabel:  "llama",
+		controller.ComponentLabel: common.ComponentLlmEngine,
+	}
+	if !maps.Equal(got.Spec.Labels, want) {
+		t.Fatalf("decode pod labels = %v, want %v", got.Spec.Labels, want)
+	}
+	if got.Spec.Prefill == nil || !maps.Equal(got.Spec.Prefill.Labels, want) {
+		t.Fatalf("prefill pod labels = %#v, want %v", got.Spec.Prefill, want)
+	}
+	if !slices.Equal(c.LabelledComponents(), []string{common.ComponentLlmEngine}) {
+		t.Fatalf("labelled components = %v, want [%s]", c.LabelledComponents(), common.ComponentLlmEngine)
+	}
 }
 
 func TestValidateLLMScaling(t *testing.T) {
