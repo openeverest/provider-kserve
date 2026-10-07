@@ -51,7 +51,7 @@ jobs:
 
       # `tilt ci` runs the same bootstrap as the local `make dev-up` loop and
       # exits once every resource is ready: the released OpenEverest core, the
-      # release-2.0 core CRDs, cert-manager, the provider image, and the
+      # matching core CRDs, cert-manager, the provider image, and the
       # provider chart (which brings the KServe CRDs and controllers with it).
       #
       # This provider's chart is not standalone — it needs the OpenEverest core
