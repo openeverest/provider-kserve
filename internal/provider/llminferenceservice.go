@@ -638,6 +638,7 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		Model: kservev1alpha2.LLMModelSpec{URI: *uri},
 	}
 	spec.Model.Name = ptr.To(servedModelName(c.Name(), params.ModelName))
+	spec.Labels = c.PodLabels(common.ComponentLlmEngine)
 
 	lora, err := buildModelLoRA(params)
 	if err != nil {
@@ -770,6 +771,8 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 
 	if topo.EnablePrefill {
 		prefill := &kservev1alpha2.WorkloadSpec{}
+		// Prefill pods serve the same model, so they count towards llmEngine.
+		prefill.Labels = c.PodLabels(common.ComponentLlmEngine)
 		if !isCPUProfile {
 			prefill.RolloutStrategy = gpuRolloutStrategy()
 		}

@@ -11,7 +11,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
-	kservev1beta1 "github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-kserve/internal/common"
@@ -30,7 +29,7 @@ func New() *Provider {
 	watches := []controller.WatchConfig{
 		controller.WatchOwned(&kservev1alpha2.LLMInferenceService{}),
 		controller.WatchOwned(&kservev1alpha2.LLMInferenceServiceConfig{}),
-		controller.WatchOwned(&kservev1beta1.InferenceService{}),
+		controller.WatchOwned(unstructuredObject(inferenceServiceGVK)),
 		controller.WatchOwned(&corev1.Service{}),
 	}
 	if common.AIGatewayEnabled() {
@@ -49,7 +48,6 @@ func New() *Provider {
 		BaseProvider: controller.BaseProvider{
 			ProviderName: common.ProviderName,
 			SchemeFuncs: []func(*runtime.Scheme) error{
-				kservev1beta1.AddToScheme,
 				kservev1alpha2.AddToScheme,
 			},
 			WatchConfigs: watches,
@@ -126,7 +124,10 @@ func (p *Provider) Cleanup(c *controller.Context) error {
 		}
 		return c.Delete(&corev1.Secret{ObjectMeta: c.ObjectMeta(aiGatewayKeySecretName(c.Name()))})
 	case common.TopologyPredictor:
-		return c.Delete(&kservev1beta1.InferenceService{ObjectMeta: c.ObjectMeta(c.Name())})
+		isvc := unstructuredObject(inferenceServiceGVK)
+		isvc.SetName(c.Name())
+		isvc.SetNamespace(c.Namespace())
+		return c.Delete(isvc)
 	default:
 		return nil
 	}

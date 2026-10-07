@@ -72,12 +72,12 @@ helm upgrade -i cert-manager jetstack/cert-manager -n cert-manager --create-name
 ```sh
 helm repo add openeverest https://openeverest.github.io/helm-charts/
 helm upgrade -i everest openeverest/openeverest -n everest-system --create-namespace \
-  --devel --version 2.0.0-dev.2 \
+  --devel --version 2.0.0-dev.4 \
   --set server.initialAdminPassword=<admin-password> \
   --wait
 
-# The 2.0.0-dev.2 chart ships older CRD schemas; apply the release-2.0 ones.
-base=https://raw.githubusercontent.com/openeverest/openeverest/main/config/crd/bases
+# Helm does not upgrade CRDs on an existing release; re-apply the ones matching the release.
+base=https://raw.githubusercontent.com/openeverest/openeverest/v2.0.0-dev.4/config/crd/bases
 for f in core.openeverest.io_providers core.openeverest.io_instances \
          core.openeverest.io_instancepresets monitoring.openeverest.io_monitoringconfigs \
          backup.openeverest.io_backupclasses backup.openeverest.io_backups \
