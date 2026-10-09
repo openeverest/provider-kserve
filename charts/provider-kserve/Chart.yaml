@@ -55,23 +55,24 @@ dependencies:
     version: "v0.21.0-rc1"
     repository: "oci://ghcr.io/kserve/charts"
     condition: kserveLlmisvcResources.enabled
-  # Optional Envoy data-plane controller. AI Gateway v0.4 requires Envoy
-  # Gateway v1.5+ and the xDS extension-manager integration configured in
-  # values.yaml.
+  # Optional Envoy data-plane controller. Agent Router (formerly Envoy AI
+  # Gateway) v1.2 requires Envoy Gateway v1.9+ (Gateway API v1.6 CRDs) and the
+  # xDS extension-manager integration configured in values.yaml.
   - name: gateway-helm
     alias: envoy-gateway
-    version: "v1.5.9"
+    version: "v1.9.2"
     repository: "oci://docker.io/envoyproxy"
     condition: envoy-gateway.enabled
   # Envoy AI Gateway installs its CRDs separately from its controller chart.
+  # The project is now Agent Router; chart names and the API group are unchanged.
   - name: ai-gateway-crds-helm
     alias: envoy-ai-gateway-crds
-    version: "v0.4.0"
+    version: "v1.2.0"
     repository: "oci://docker.io/envoyproxy"
     condition: envoy-ai-gateway.enabled
   - name: ai-gateway-helm
     alias: envoy-ai-gateway
-    version: "v0.4.0"
+    version: "v1.2.0"
     repository: "oci://docker.io/envoyproxy"
     condition: envoy-ai-gateway.enabled
   # Optional LeaderWorkerSet controller for multi-node llm Instances

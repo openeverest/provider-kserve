@@ -37,7 +37,7 @@ const (
 
 var (
 	aiGatewayRouteGVK = schema.GroupVersionKind{
-		Group: "aigateway.envoyproxy.io", Version: "v1alpha1", Kind: "AIGatewayRoute",
+		Group: "aigateway.envoyproxy.io", Version: "v1beta1", Kind: "AIGatewayRoute",
 	}
 	backendTrafficPolicyGVK = schema.GroupVersionKind{
 		Group: "gateway.envoyproxy.io", Version: "v1alpha1", Kind: "BackendTrafficPolicy",

@@ -455,7 +455,7 @@ cpuProfile:
 # `aiGateway.enabled` creates one shared Gateway and turns on the feature in
 # the provider. It does not install controllers: either set
 # `envoy-gateway.enabled` / `envoy-ai-gateway.enabled` below, or bring your own
-# Envoy Gateway (v1.5+, with the extension-manager config below) and Envoy AI
+# Envoy Gateway (v1.9+, with the extension-manager config below) and Envoy AI
 # Gateway. Individual llm Instances opt in with
 # `spec.topology.parameters.externalAccess: EnvoyAIGateway`.
 # TLS is chart-level (`aiGateway.tls`), not an Instance form field.
