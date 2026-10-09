@@ -3,14 +3,14 @@
 spec:
   componentTypes:
     modelServer:
+      defaultVersion: 0.21.0
       versions:
-        - default: true
-          image: kserve/kserve-controller:v0.21.0
+        - image: kserve/kserve-controller:v0.21.0
           version: 0.21.0
     vllm:
+      defaultVersion: 0.26.0
       versions:
-        - default: true
-          image: ghcr.io/llm-d/llm-d-cuda:v0.9.0
+        - image: ghcr.io/llm-d/llm-d-cuda:v0.9.0
           version: 0.26.0
   components:
     llmEngine:
@@ -136,6 +136,9 @@ spec:
               type: string
           type: object
       type: modelServer
+  defaultVersion: "0.21"
+  release:
+    version: 0.1.0
   topologies:
     llm:
       components:
@@ -252,6 +255,7 @@ spec:
                 label: vLLM Runtime Version
                 optionsPath: spec.componentTypes.vllm.versions
                 optionsPathConfig:
+                  defaultValuePath: spec.componentTypes.vllm.defaultVersion
                   labelPath: version
                   valuePath: version
               path: spec.components.llmEngine.version
@@ -745,7 +749,6 @@ spec:
     - components:
         llmEngine: 0.26.0
         predictor: 0.21.0
-      default: true
       name: "0.21"
     - components:
         llmEngine: 0.26.0
