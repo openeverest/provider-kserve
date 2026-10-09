@@ -112,18 +112,34 @@ spec:
 {{- end }}
 {{- if (index .Values "envoy-gateway").enabled }}
 ---
-# The upstream AI Gateway chart binds the Envoy Gateway service account in
-# envoy-gateway-system; the bundled Envoy Gateway runs in this namespace.
+# The upstream AI Gateway chart grants InferencePool reads to the Envoy Gateway
+# service account in envoy-gateway-system; the bundled one runs in this namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "provider-kserve.aiGatewayPoolReaderName" . }}
+  labels:
+    {{- include "provider-kserve.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - inference.networking.k8s.io
+    resources:
+      - inferencepools
+    verbs:
+      - get
+      - list
+      - watch
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "provider-kserve.aiGatewayReaderBindingName" . }}
+  name: {{ include "provider-kserve.aiGatewayPoolReaderName" . }}
   labels:
     {{- include "provider-kserve.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: envoy-ai-gateway-inference-pool-reader
+  name: {{ include "provider-kserve.aiGatewayPoolReaderName" . }}
 subjects:
   - kind: ServiceAccount
     name: envoy-gateway

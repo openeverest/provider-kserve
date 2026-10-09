@@ -329,7 +329,7 @@ envoy-ai-gateway:
   enabled: true        # false when Envoy AI Gateway already runs
 ```
 
-When you bring your own Envoy Gateway (v1.5+), it must carry the AI Gateway extension-manager
+When you bring your own Envoy Gateway (v1.9+), it must carry the AI Gateway extension-manager
 config from `envoy-gateway.config` in [values.yaml](charts/provider-kserve/values.yaml).
 
 API keys (`aiGateway.auth.enabled`, on by default) require HTTPS, so the chart refuses to render
@@ -642,6 +642,10 @@ reconcile them. The controllers that do are bundled as Helm subchart dependencie
 Helm installs a subchart's CRDs only on `helm install`. When you turn on `lws`,
 `envoy-gateway` or `envoy-ai-gateway` later with `helm upgrade`, apply their CRDs first, for
 example `helm show crds oci://registry.k8s.io/lws/charts/lws --version 0.8.0 | kubectl apply --server-side -f -`.
+The same applies when a chart upgrade bumps Envoy Gateway: re-apply its CRDs and the Gateway API
+CRDs it bundles before `helm upgrade`, for example
+`helm template eg oci://docker.io/envoyproxy/gateway-crds-helm --version v1.9.2 --set crds.gatewayAPI.enabled=true --set crds.envoyGateway.enabled=true | kubectl apply --server-side --force-conflicts -f -`.
+The Envoy AI Gateway CRDs are regular templates and upgrade with the release.
 
 The KServe CRDs are **not** part of this chart (see [KServe CRDs](#kserve-crds)).
 

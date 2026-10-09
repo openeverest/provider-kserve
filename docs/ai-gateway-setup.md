@@ -44,11 +44,11 @@ In the commands below, `NS=provider-kserve` is the release namespace.
 
 cert-manager's Gateway API support (which issues the Gateway's TLS certificate)
 refuses to start if the CRDs are missing, so install the exact set bundled with
-the Envoy Gateway version the chart pins (v1.5.9):
+the Envoy Gateway version the chart pins (v1.9.2, Gateway API v1.6):
 
 ```sh
-helm pull oci://docker.io/envoyproxy/gateway-helm --version v1.5.9 --untar -d /tmp/eg
-kubectl apply --server-side -f /tmp/eg/gateway-helm/crds/gatewayapi-crds.yaml
+helm pull oci://docker.io/envoyproxy/gateway-helm --version v1.9.2 --untar -d /tmp/eg
+kubectl apply --server-side -f /tmp/eg/gateway-helm/charts/crds/crds/gatewayapi-crds.yaml
 ```
 
 ## 2. cert-manager (with Gateway API support)
@@ -106,7 +106,7 @@ aiGateway:
 ```
 
 cert-manager stays off (`cert-manager.enabled=false` is the default) because
-it was installed in step 2. If the cluster already runs Envoy Gateway (v1.5+),
+it was installed in step 2. If the cluster already runs Envoy Gateway (v1.9+),
 leave `envoy-gateway.enabled` off and apply the `envoy-gateway.config`
 extension-manager settings from the chart's `values.yaml` to it instead;
 running two Envoy Gateways makes them fight over the same Gateways.
