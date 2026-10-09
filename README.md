@@ -138,8 +138,13 @@ helm uninstall provider-kserve --namespace everest-system
 ```
 
 Uninstalling the chart does **not** delete running `Instance` resources, the KServe CRDs, or
-the `ClusterServingRuntime`s, `ClusterStorageContainer` and LLM presets the hook Job applied.
+the `ClusterServingRuntime`s and `ClusterStorageContainer` the hook Job applied.
 See [KServe CRDs](#kserve-crds).
+
+Uninstall hooks remove what the bundled controllers would otherwise leave stuck in
+`Terminating`: the AI Gateway `Gateway`/`GatewayClass` (and its load balancer), and the LLM
+presets. If any `LLMInferenceService` still exists, the presets are kept, so delete the
+`Instance`s first when you also plan to delete the release namespace.
 
 ## Usage
 

@@ -1,0 +1,64 @@
+{{- /*
+Uninstall cleanup. Helm deletes the bundled controllers together with objects
+they hold finalizers on, and the Envoy Gateway subchart leaves cluster-scoped
+hook resources behind. Without this, the GatewayClass and the LLM presets hang
+in Terminating and block deletion of the release namespace.
+
+pre-delete: delete the Gateway and GatewayClass while Envoy Gateway still runs,
+so it removes the proxy, its LoadBalancer and the GatewayClass finalizer.
+
+post-delete: KServe's webhook refuses to delete its well-known presets while the
+llmisvc controller runs, so they are removed once it is gone, clearing the
+finalizer it can no longer release. Also removes Envoy Gateway's leftover
+cluster-scoped certgen RBAC and topology-injector webhook.
+*/}}
+{{- $gateway := and .Values.aiGateway.enabled (index .Values "envoy-gateway").enabled }}
+{{- $envoyGateway := (index .Values "envoy-gateway").enabled }}
+{{- $presets := list }}
+{{- if .Values.llmPresets.enabled }}
+{{- range (include "provider-kserve.kserveObjects" . | splitList "\n---") }}
+{{- $object := fromYaml . }}
+{{- if eq (get $object "kind") "LLMInferenceServiceConfig" }}
+{{- $presets = append $presets $object.metadata.name }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $fullname := include "provider-kserve.fullname" . }}
+{{- if $gateway }}
+{{- $rules := list
+  (dict "apiGroups" (list "gateway.networking.k8s.io") "resources" (list "gateways" "gatewayclasses") "verbs" (list "get" "list" "watch" "delete"))
+  (dict "apiGroups" (list "apps") "resources" (list "deployments") "verbs" (list "get" "list" "watch"))
+  (dict "apiGroups" (list "") "resources" (list "services") "verbs" (list "get" "list" "watch")) }}
+{{- $script := printf `gateway=%s
+kubectl -n "${NAMESPACE}" delete gateway "${gateway}" --ignore-not-found --timeout=120s
+kubectl -n "${NAMESPACE}" wait deployments,services --for=delete --timeout=180s \
+  -l "gateway.envoyproxy.io/owning-gateway-name=${gateway},gateway.envoyproxy.io/owning-gateway-namespace=${NAMESPACE}" 2>/dev/null
+kubectl delete gatewayclass %s --ignore-not-found --timeout=120s \
+  || echo "WARNING: GatewayClass not deleted; remove its finalizer manually"` (include "provider-kserve.aiGatewayName" .) (include "provider-kserve.aiGatewayClassName" .) }}
+{{ include "provider-kserve.cleanupHook" (dict "root" . "name" (printf "%s-pre-delete" $fullname) "hook" "pre-delete" "rules" $rules "script" $script) }}
+{{- end }}
+{{- if or $presets $envoyGateway }}
+{{- $rules := list }}
+{{- $script := "" }}
+{{- if $presets }}
+{{- $rules = append $rules (dict "apiGroups" (list "serving.kserve.io") "resources" (list "llminferenceserviceconfigs") "verbs" (list "get" "list" "patch" "delete")) }}
+{{- $rules = append $rules (dict "apiGroups" (list "serving.kserve.io") "resources" (list "llminferenceservices") "verbs" (list "list")) }}
+{{- $script = printf `if [ -n "$(kubectl get llminferenceservices -A -o name)" ]; then
+  echo "Keeping the LLM presets: LLMInferenceServices still use them"
+else
+  for preset in %s; do
+    kubectl -n "${NAMESPACE}" patch llminferenceserviceconfig "${preset}" --type=merge -p '{"metadata":{"finalizers":null}}' 2>/dev/null
+    kubectl -n "${NAMESPACE}" delete llminferenceserviceconfig "${preset}" --ignore-not-found --wait=false
+  done
+fi` (join " " $presets) }}
+{{- end }}
+{{- if $envoyGateway }}
+{{- $rules = append $rules (dict "apiGroups" (list "rbac.authorization.k8s.io") "resources" (list "clusterroles" "clusterrolebindings") "verbs" (list "list" "delete")) }}
+{{- $rules = append $rules (dict "apiGroups" (list "admissionregistration.k8s.io") "resources" (list "mutatingwebhookconfigurations") "verbs" (list "list" "delete")) }}
+{{- $script = printf `%s
+kubectl delete clusterrolebindings,clusterroles,mutatingwebhookconfigurations --ignore-not-found \
+  -l "app.kubernetes.io/name=envoy-gateway,app.kubernetes.io/instance=%s"` $script .Release.Name }}
+{{- end }}
+---
+{{ include "provider-kserve.cleanupHook" (dict "root" . "name" (printf "%s-post-delete" $fullname) "hook" "post-delete" "rules" $rules "script" $script) }}
+{{- end }}
