@@ -6,7 +6,7 @@
 # TestCatalogMatchesChart (internal/common/versions_test.go) fails the build
 # when the two drift, so bump this file in the same PR as the subcharts.
 #
-# Mark exactly one version per type as `default: true`, and exactly one bundle.
+# Name the default version per type and the default bundle via `defaultVersion`.
 #
 # Note: these images are catalog metadata surfaced to the UI version picker and
 # used for bundle resolution; they are not injected into the CRs directly.
@@ -16,27 +16,27 @@
 
 componentTypes:
   vllm:
+    defaultVersion: "0.26.0"
     versions:
       # The vLLM in the bundled GPU presets' runtime image (llm-d v0.9.0 ships
       # vLLM 0.26.0 as of KServe v0.21.0). The CPU profile runs its own build,
       # cpuProfile.image in charts/provider-kserve/values.yaml.
       - version: "0.26.0"
         image: ghcr.io/llm-d/llm-d-cuda:v0.9.0
-        default: true
   modelServer:
+    defaultVersion: "0.21.0"
     versions:
       - version: "0.21.0"
         image: kserve/kserve-controller:v0.21.0
-        default: true
 
 # Version bundles: curated, mutually compatible sets keyed to a KServe release.
 #
 # One bundle, because the chart bundles exactly one set of KServe controllers.
 # Offering a choice the chart cannot install would be fiction. Add a bundle here
 # only when the chart can actually deliver it.
+defaultVersion: "0.21"
 versions:
   - name: "0.21"
-    default: true
     components:
       llmEngine: "0.26.0"
       predictor: "0.21.0"

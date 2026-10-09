@@ -17,14 +17,14 @@ import (
 func TestCatalogMatchesChart(t *testing.T) {
 	var catalog struct {
 		ComponentTypes map[string]struct {
-			Versions []struct {
+			DefaultVersion string `json:"defaultVersion"`
+			Versions       []struct {
 				Version string `json:"version"`
-				Default bool   `json:"default"`
 			} `json:"versions"`
 		} `json:"componentTypes"`
-		Versions []struct {
+		DefaultVersion string `json:"defaultVersion"`
+		Versions       []struct {
 			Name       string            `json:"name"`
-			Default    bool              `json:"default"`
 			Components map[string]string `json:"components"`
 		} `json:"versions"`
 	}
@@ -63,19 +63,21 @@ func TestCatalogMatchesChart(t *testing.T) {
 		chartKServe = v
 	}
 
-	var defaultBundle string
+	defaultBundle := catalog.DefaultVersion
+	if defaultBundle == "" {
+		t.Fatal("defaultVersion does not name a version bundle")
+	}
 	predictor := ""
-	bundles := 0
+	bundleFound := false
 	for _, b := range catalog.Versions {
-		if !b.Default {
+		if b.Name != defaultBundle {
 			continue
 		}
-		bundles++
-		defaultBundle = b.Name
+		bundleFound = true
 		predictor = b.Components["predictor"]
 	}
-	if bundles != 1 {
-		t.Fatalf("want exactly one default version bundle, got %d", bundles)
+	if !bundleFound {
+		t.Fatalf("defaultVersion %q does not name any version bundle", defaultBundle)
 	}
 
 	// "v0.20.0" (chart) vs "0.20.0" (catalog predictor) vs "0.20" (bundle name).
@@ -92,14 +94,18 @@ func TestCatalogMatchesChart(t *testing.T) {
 	}
 
 	for name, ct := range catalog.ComponentTypes {
-		defaults := 0
+		if ct.DefaultVersion == "" {
+			t.Errorf("componentTypes.%s: defaultVersion is not set", name)
+			continue
+		}
+		versionFound := false
 		for _, v := range ct.Versions {
-			if v.Default {
-				defaults++
+			if v.Version == ct.DefaultVersion {
+				versionFound = true
 			}
 		}
-		if defaults != 1 {
-			t.Errorf("componentTypes.%s: want exactly one default version, got %d", name, defaults)
+		if !versionFound {
+			t.Errorf("componentTypes.%s: defaultVersion %q does not name any version", name, ct.DefaultVersion)
 		}
 	}
 }
