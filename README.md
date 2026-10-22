@@ -8,6 +8,7 @@
 <!-- Remove the pre-alpha banner and the status badge at v2 GA. -->
 
 [![Status](https://img.shields.io/badge/status-pre--alpha-orange)](https://github.com/openeverest/openeverest)
+[![Release](https://img.shields.io/github/v/release/openeverest/provider-kserve)](https://github.com/openeverest/provider-kserve/releases)
 [![CI](https://github.com/openeverest/provider-kserve/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/openeverest/provider-kserve/actions/workflows/build.yaml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/openeverest/provider-kserve.svg)](https://pkg.go.dev/github.com/openeverest/provider-kserve)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
@@ -48,11 +49,19 @@ formerly called this mode `RawDeployment`.
 
 ## Compatibility
 
-The latest release is `0.1.0`.
+Releases and their changelogs are on
+[GitHub Releases](https://github.com/openeverest/provider-kserve/releases); `helm install`
+without `--version` takes the latest.
 
 | provider-kserve | OpenEverest | KServe | Kubernetes |
 |---|---|---|---|
-| `0.1.0` | `>= 2.0.0-dev.2` | `0.21.x` | `1.30` – `1.36` |
+| `0.4.x` | `>= 2.0.0-dev.4` | `0.21.0` | `1.30` – `1.36` |
+| `0.2.3` – `0.3.0` | `>= 2.0.0-dev.4` | `0.21.0-rc1` | `1.30` – `1.36` |
+| `0.2.0` – `0.2.2` | `>= 2.0.0-dev.2` | `0.21.0-rc1` | `1.30` – `1.36` |
+| `0.1.x` | `>= 2.0.0-dev.2` | `0.20.0` | `1.30` – `1.34` |
+
+From `0.2.3` the provider reports per-component status and applies pod scheduling policies,
+which need the Instance API of OpenEverest `2.0.0-dev.4`.
 
 ## Capabilities
 
