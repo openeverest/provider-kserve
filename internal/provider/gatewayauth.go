@@ -166,9 +166,12 @@ func (r *gatewayAuthReconciler) deleteOutputs(ctx context.Context) error {
 }
 
 // resolveGatewayKeys turns API key Secrets into keys with the served model
-// names they may call. It fails closed: a model name served by more than one
-// route is granted to nobody, and keys without any resolvable model are left
-// out entirely.
+// names they may call. It fails closed: a key only reaches models in its own
+// namespace, a model name served by more than one route is granted to nobody,
+// and keys without any resolvable model are left out entirely. Envoy rejects
+// the whole policy, and with it every route on the Gateway, when two keys
+// share an ID or a value, so every key involved in such a collision is left
+// out instead: a collision only ever affects the colliding keys.
 func resolveGatewayKeys(
 	secrets []corev1.Secret,
 	routes []unstructured.Unstructured,
@@ -194,9 +197,9 @@ func resolveGatewayKeys(
 		return secrets[i].Namespace+"/"+secrets[i].Name < secrets[j].Namespace+"/"+secrets[j].Name
 	})
 
-	var keys []gatewayKey
+	var candidates []gatewayKey
+	var refs []string
 	var warnings []string
-	seen := map[string]bool{}
 	for i := range secrets {
 		secret := &secrets[i]
 		ref := secret.Namespace + "/" + secret.Name
@@ -209,17 +212,19 @@ func resolveGatewayKeys(
 		case value == "":
 			warnings = append(warnings, fmt.Sprintf("skipping api key secret %s: empty %s", ref, aiGatewayKeyDataKey))
 			continue
-		case seen[id]:
-			warnings = append(warnings, fmt.Sprintf("skipping api key secret %s: duplicate key id %q", ref, id))
-			continue
 		}
-		seen[id] = true
 
 		var models []string
 		for _, modelRef := range parseModelRefs(secret.Annotations[aiGatewayModelsAnnotation]) {
 			namespace, instance, ok := strings.Cut(modelRef, "/")
 			if !ok || namespace == "" || instance == "" {
 				warnings = append(warnings, fmt.Sprintf("api key secret %s: invalid model ref %q", ref, modelRef))
+				continue
+			}
+			// Whoever can write Secrets in a namespace can already read the
+			// keys of its models, but must not grant itself other namespaces'.
+			if namespace != secret.Namespace {
+				warnings = append(warnings, fmt.Sprintf("api key secret %s: model ref %q is in another namespace; access denied", ref, modelRef))
 				continue
 			}
 			for _, model := range routeModels[namespace+"/"+aiGatewayRouteName(instance)] {
@@ -234,7 +239,27 @@ func resolveGatewayKeys(
 			continue
 		}
 		slices.Sort(models)
-		keys = append(keys, gatewayKey{id: id, value: value, models: slices.Compact(models)})
+		candidates = append(candidates, gatewayKey{id: id, value: value, models: slices.Compact(models)})
+		refs = append(refs, ref)
+	}
+
+	ids := map[string]int{}
+	values := map[string]int{}
+	for _, key := range candidates {
+		ids[key.id]++
+		values[key.value]++
+	}
+	var keys []gatewayKey
+	for i, key := range candidates {
+		switch {
+		case ids[key.id] > 1:
+			warnings = append(warnings, fmt.Sprintf("skipping api key secret %s: key id %q is used by several secrets", refs[i], key.id))
+		case values[key.value] > 1:
+			// Never log the value itself.
+			warnings = append(warnings, fmt.Sprintf("skipping api key secret %s: its %s is used by another key secret", refs[i], aiGatewayKeyDataKey))
+		default:
+			keys = append(keys, key)
+		}
 	}
 	return keys, warnings
 }

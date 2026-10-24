@@ -32,7 +32,8 @@ func TestResolveGatewayKeys(t *testing.T) {
 
 	routes := []unstructured.Unstructured{
 		*aiGatewayRouteObject("a", "chat-ai-gateway", "gw", "gw-ns", "chat"),
-		*aiGatewayRouteObject("b", "code-ai-gateway", "gw", "gw-ns", "code"),
+		*aiGatewayRouteObject("a", "code-ai-gateway", "gw", "gw-ns", "code"),
+		*aiGatewayRouteObject("b", "review-ai-gateway", "gw", "gw-ns", "review"),
 		// Two routes on the gateway serve "dup": nobody may call it.
 		*aiGatewayRouteObject("c", "dup1-ai-gateway", "gw", "gw-ns", "dup"),
 		*aiGatewayRouteObject("d", "dup2-ai-gateway", "gw", "gw-ns", "dup"),
@@ -40,13 +41,25 @@ func TestResolveGatewayKeys(t *testing.T) {
 	}
 	secrets := []corev1.Secret{
 		keySecret("a", "chat-ai-gateway-key", "k_chat", "key-chat", "a/chat"),
-		keySecret("x", "multi", "k_multi", "key-multi", "b/code,a/chat"),
+		keySecret("a", "multi", "k_multi", "key-multi", "a/code,a/chat"),
+		// Keys only reach models in their own namespace.
+		keySecret("x", "foreign", "k_foreign", "key-foreign", "a/chat,b/review"),
+		keySecret("b", "mixed", "k_mixed", "key-mixed", "b/review,a/chat"),
 		keySecret("c", "dup1-ai-gateway-key", "k_dup", "key-dup", "c/dup1"),
 		keySecret("e", "elsewhere-ai-gateway-key", "k_elsewhere", "key-elsewhere", "e/elsewhere"),
 		keySecret("z", "off", "k_off", "key-off", "z/not-on-gateway"),
 		keySecret("y", "bad-id", "BAD", "key-bad", "a/chat"),
 		keySecret("y", "empty", "k_empty", "", "a/chat"),
+		// Another namespace claims k_chat without access to its model: no effect.
 		keySecret("zz", "copy", "k_chat", "key-copy", "a/chat"),
+		// Envoy rejects the whole policy on a shared ID or value, so every key
+		// involved is left out, and only those.
+		keySecret("b", "dup-id-1", "k_dupid", "key-dup-id-1", "b/review"),
+		keySecret("a", "dup-id-2", "k_dupid", "key-dup-id-2", "a/code"),
+		keySecret("b", "dup-value-1", "k_dupvalue1", "key-shared", "b/review"),
+		keySecret("a", "dup-value-2", "k_dupvalue2", "key-shared", "a/chat"),
+		// Claims that resolve to no model collide with nothing.
+		keySecret("e", "dup-id-3", "k_mixed", "key-chat", "e/elsewhere"),
 	}
 
 	keys, warnings := resolveGatewayKeys(secrets, routes, "gw", "gw-ns")
@@ -58,6 +71,7 @@ func TestResolveGatewayKeys(t *testing.T) {
 	want := map[string]string{
 		"k_chat":  "key-chat:chat",
 		"k_multi": "key-multi:chat,code",
+		"k_mixed": "key-mixed:review",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("keys = %v, want %v", got, want)
@@ -67,7 +81,7 @@ func TestResolveGatewayKeys(t *testing.T) {
 			t.Fatalf("key %s = %q, want %q (all keys %v)", id, got[id], value, got)
 		}
 	}
-	for _, expected := range []string{"invalid key id", "empty api_key", "duplicate key id", "served by several routes"} {
+	for _, expected := range []string{"invalid key id", "empty api_key", "served by several routes", "in another namespace", "used by several secrets", "used by another key secret"} {
 		if !strings.Contains(strings.Join(warnings, "\n"), expected) {
 			t.Fatalf("warnings %v do not mention %q", warnings, expected)
 		}
