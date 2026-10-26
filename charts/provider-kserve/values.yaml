@@ -105,9 +105,9 @@ provider:
   # used in other contexts where a short concise provider identifier is needed.
   shortName: kserve
 
-# -- Default instance presets configuration
+# -- Default cluster instance presets configuration
 # Each preset must have 'name', 'enabled', and 'spec' fields.
-# The 'spec' field contains the full InstancePresetSpec.
+# The 'spec' field contains the full ClusterInstancePresetSpec.
 # Note: The provider shortName will be automatically added to each preset name.
 presets:
   # smollm-cpu — a tiny, ungated model on CPU-only nodes. Sized for local

@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	// v0.21.0 exceeds the Go module size limit; its v1alpha2 API is identical to rc1.
 	github.com/kserve/kserve v0.21.0-rc1
-	github.com/openeverest/openeverest/v2 v2.0.0-dev.4
+	github.com/openeverest/openeverest/v2 v2.0.0-dev.2.0.20261026085633-270ecca88d71
 	k8s.io/api v0.37.1
 	k8s.io/apimachinery v0.37.1
 	k8s.io/client-go v0.37.1
