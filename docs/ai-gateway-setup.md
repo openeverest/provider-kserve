@@ -81,6 +81,7 @@ base=https://raw.githubusercontent.com/openeverest/openeverest/v2.0.0-dev.4/conf
 for f in core.openeverest.io_providers core.openeverest.io_instances \
          core.openeverest.io_instancepresets monitoring.openeverest.io_monitoringconfigs \
          backup.openeverest.io_backupclasses backup.openeverest.io_backups \
+         core.openeverest.io_clusterinstancepresets \
          backup.openeverest.io_restores backup.openeverest.io_backupstorages; do
   kubectl apply --server-side --force-conflicts -f $base/$f.yaml
 done
