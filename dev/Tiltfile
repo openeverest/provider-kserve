@@ -168,7 +168,6 @@ if install_openeverest:
         'core.openeverest.io_providers.yaml',
         'core.openeverest.io_instances.yaml',
         'core.openeverest.io_instancepresets.yaml',
-        'core.openeverest.io_clusterinstancepresets.yaml',
         'monitoring.openeverest.io_monitoringconfigs.yaml',
         'backup.openeverest.io_backupclasses.yaml',
         'backup.openeverest.io_backups.yaml',
