@@ -52,6 +52,7 @@ const (
 
 	podMonitorEnabledEnvVar  = "ENABLE_POD_MONITOR"
 	podMonitorIntervalEnvVar = "POD_MONITOR_INTERVAL"
+	localModelEnabledEnvVar  = "LOCAL_MODEL_ENABLED"
 
 	storageInitializerResourcesEnvVar = "STORAGE_INITIALIZER_RESOURCES"
 
@@ -81,6 +82,12 @@ func AIGatewayName() string {
 // AIGatewayEnabled reports whether the optional gateway stack is configured.
 func AIGatewayEnabled() bool {
 	return os.Getenv(aiGatewayEnabledEnvVar) == "true"
+}
+
+// LocalModelEnabled reports whether the KServe LocalModel controller and CRDs
+// are enabled by the provider chart.
+func LocalModelEnabled() bool {
+	return os.Getenv(localModelEnabledEnvVar) == "true"
 }
 
 // AIGatewayNamespace returns the namespace containing the shared Gateway.

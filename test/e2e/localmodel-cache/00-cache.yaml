@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kserve-localmodel-jobs
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: localmodel-e2e
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: serving.kserve.io/v1alpha1
+kind: LocalModelNodeGroup
+metadata:
+  name: localmodel-e2e
+spec:
+  storageLimit: 2Gi
+  persistentVolumeClaimSpec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 2Gi
+    storageClassName: localmodel-e2e
+  persistentVolumeSpec:
+    accessModes:
+      - ReadWriteOnce
+    capacity:
+      storage: 2Gi
+    storageClassName: localmodel-e2e
+    local:
+      path: /models
+    nodeAffinity:
+      required:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kserve/localmodel
+                operator: In
+                values:
+                  - worker

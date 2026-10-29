@@ -32,6 +32,9 @@ func New() *Provider {
 		controller.WatchOwned(unstructuredObject(inferenceServiceGVK)),
 		controller.WatchOwned(&corev1.Service{}),
 	}
+	if common.LocalModelEnabled() {
+		watches = append(watches, controller.WatchOwned(unstructuredObject(localModelNamespaceCacheGVK)))
+	}
 	if common.AIGatewayEnabled() {
 		watches = append(watches,
 			controller.WatchOwned(unstructuredObject(aiGatewayRouteGVK)),
@@ -114,15 +117,27 @@ func (p *Provider) Cleanup(c *controller.Context) error {
 
 	switch c.Instance().GetTopologyType() {
 	case common.TopologyLLM:
-		if err := c.Delete(&kservev1alpha2.LLMInferenceService{ObjectMeta: c.ObjectMeta(c.Name())}); err != nil {
+		workloadDeleted, err := deleteLLMForCacheTransition(c)
+		if err != nil {
 			return err
+		}
+		if !workloadDeleted {
+			if err := cleanupLocalModelNamespaceCache(c); err != nil {
+				return err
+			}
 		}
 		// The inline Advanced config is owner-ref garbage-collected; delete it
 		// explicitly too (no-op when absent).
 		if err := c.Delete(&kservev1alpha2.LLMInferenceServiceConfig{ObjectMeta: c.ObjectMeta(instanceConfigName(c.Name()))}); err != nil {
 			return err
 		}
-		return c.Delete(&corev1.Secret{ObjectMeta: c.ObjectMeta(aiGatewayKeySecretName(c.Name()))})
+		if err := c.Delete(&corev1.Secret{ObjectMeta: c.ObjectMeta(aiGatewayKeySecretName(c.Name()))}); err != nil {
+			return err
+		}
+		if workloadDeleted {
+			return controller.WaitFor("waiting for LLMInferenceService deletion before LocalModelNamespaceCache cleanup")
+		}
+		return nil
 	case common.TopologyPredictor:
 		isvc := unstructuredObject(inferenceServiceGVK)
 		isvc.SetName(c.Name())

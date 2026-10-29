@@ -5,15 +5,26 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/kserve/kserve/pkg/constants"
 
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
+	"knative.dev/pkg/apis"
+	duckv1 "knative.dev/pkg/apis/duck/v1"
 
 	commonv1alpha1 "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
@@ -219,7 +230,7 @@ func llmContext(t *testing.T, replicas *int32, params components.VllmCustomSpec,
 		params.ModelURI = "hf://org/model"
 	}
 	inst := &corev1alpha1.Instance{
-		ObjectMeta: metav1.ObjectMeta{Name: "llama", Namespace: "ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: "llama", Namespace: "ns", UID: "instance-uid"},
 		Spec: corev1alpha1.InstanceSpec{
 			Topology: &corev1alpha1.TopologySpec{
 				Type:       common.TopologyLLM,
@@ -235,6 +246,599 @@ func llmContext(t *testing.T, replicas *int32, params components.VllmCustomSpec,
 		},
 	}
 	return controller.NewContext(context.Background(), nil, inst, common.ProviderName)
+}
+
+func localModelNamespaceCacheForTest(sourceURI string) *unstructured.Unstructured {
+	cache := unstructuredObject(localModelNamespaceCacheGVK)
+	cache.SetName("llama")
+	cache.SetNamespace("ns")
+	cache.Object["spec"] = map[string]any{
+		"sourceModelUri": sourceURI,
+		"modelSize":      "1Gi",
+		"nodeGroups":     []any{"model-workers"},
+	}
+	return cache
+}
+
+func controlLocalModelNamespaceCache(cache *unstructured.Unstructured, inst *corev1alpha1.Instance) {
+	cache.SetOwnerReferences([]metav1.OwnerReference{{
+		APIVersion: "core.openeverest.io/v1alpha1",
+		Kind:       "Instance",
+		Name:       inst.Name,
+		UID:        inst.UID,
+		Controller: ptr.To(true),
+	}})
+}
+
+func localModelCacheTestScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := kservev1alpha2.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	return scheme
+}
+
+type noMatchLocalModelClient struct {
+	client.Client
+}
+
+func (c noMatchLocalModelClient) Get(
+	ctx context.Context,
+	key client.ObjectKey,
+	obj client.Object,
+	opts ...client.GetOption,
+) error {
+	if obj.GetObjectKind().GroupVersionKind() == localModelNamespaceCacheGVK {
+		return &apimeta.NoKindMatchError{GroupKind: localModelNamespaceCacheGVK.GroupKind()}
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+func TestValidateLLMLocalModelCache(t *testing.T) {
+	valid := components.LocalModelCacheSpec{
+		Enabled:   components.LocalModelCacheEnabled,
+		ModelSize: "2Gi",
+		NodeGroup: "model-workers",
+	}
+	cases := []struct {
+		name         string
+		chartEnabled string
+		cache        components.LocalModelCacheSpec
+		disableSI    bool
+		wantErr      string
+	}{
+		{name: "chart disabled", cache: valid, wantErr: "requires kserveResources.kserve.localmodel.enabled"},
+		{name: "invalid mode", chartEnabled: "true", cache: components.LocalModelCacheSpec{Enabled: "sometimes"}, wantErr: `enabled must be "disabled" or "enabled"`},
+		{name: "missing size", chartEnabled: "true", cache: components.LocalModelCacheSpec{Enabled: components.LocalModelCacheEnabled, NodeGroup: "model-workers"}, wantErr: "modelSize is required"},
+		{name: "invalid size", chartEnabled: "true", cache: components.LocalModelCacheSpec{Enabled: components.LocalModelCacheEnabled, ModelSize: "large", NodeGroup: "model-workers"}, wantErr: "modelSize"},
+		{name: "zero size", chartEnabled: "true", cache: components.LocalModelCacheSpec{Enabled: components.LocalModelCacheEnabled, ModelSize: "0", NodeGroup: "model-workers"}, wantErr: "greater than zero"},
+		{name: "missing node group", chartEnabled: "true", cache: components.LocalModelCacheSpec{Enabled: components.LocalModelCacheEnabled, ModelSize: "2Gi"}, wantErr: "nodeGroup is required"},
+		{name: "invalid node group", chartEnabled: "true", cache: components.LocalModelCacheSpec{Enabled: components.LocalModelCacheEnabled, ModelSize: "2Gi", NodeGroup: "Not_Valid"}, wantErr: "nodeGroup"},
+		{name: "storage initializer disabled", chartEnabled: "true", cache: valid, disableSI: true, wantErr: "disableStorageInitializer must remain false"},
+		{name: "valid", chartEnabled: "true", cache: valid},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LOCAL_MODEL_ENABLED", tc.chartEnabled)
+			params := components.VllmCustomSpec{LocalModelCache: &tc.cache}
+			if tc.disableSI {
+				params.DisableStorageInitializer = ptr.To(true)
+			}
+			err := validateLLM(llmContext(t, nil, params, llm.LlmTopologyParameters{}))
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validateLLM() error = %v, want containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateLLMLocalModelCacheServiceAccountAuthorization(t *testing.T) {
+	t.Setenv("LOCAL_MODEL_ENABLED", "true")
+	cases := []struct {
+		name               string
+		serviceAccountName string
+		jobNamespace       string
+		binding            string
+		create             bool
+		wantErr            string
+	}{
+		{name: "anonymous"},
+		{name: "authorized", serviceAccountName: "model-puller", binding: "ns", create: true},
+		{name: "missing", serviceAccountName: "model-puller", wantErr: "was not found"},
+		{name: "unbound", serviceAccountName: "model-puller", create: true, wantErr: "is missing required annotation"},
+		{name: "wrong tenant", serviceAccountName: "model-puller", binding: "other-ns", create: true, wantErr: "not Instance namespace"},
+		{name: "custom job namespace", serviceAccountName: "model-puller", jobNamespace: "custom-jobs", binding: "ns", create: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(localModelJobNamespaceEnv, tc.jobNamespace)
+			scheme := localModelCacheTestScheme(t)
+			builder := fake.NewClientBuilder().WithScheme(scheme)
+			if tc.create {
+				namespace := tc.jobNamespace
+				if namespace == "" {
+					namespace = defaultLocalModelJobNamespace
+				}
+				builder = builder.WithObjects(&corev1.ServiceAccount{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:        tc.serviceAccountName,
+						Namespace:   namespace,
+						Annotations: map[string]string{localModelInstanceNamespaceAnnotation: tc.binding},
+					},
+				})
+			}
+
+			params := components.VllmCustomSpec{
+				LocalModelCache: &components.LocalModelCacheSpec{
+					Enabled:            components.LocalModelCacheEnabled,
+					ModelSize:          "2Gi",
+					NodeGroup:          "model-workers",
+					ServiceAccountName: tc.serviceAccountName,
+				},
+			}
+			inst := llmContext(t, nil, params, llm.LlmTopologyParameters{}).Instance()
+			c := controller.NewContext(context.Background(), builder.Build(), inst, common.ProviderName)
+			err := validateLLM(c)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "llmEngine.parameters.localModelCache.serviceAccountName") ||
+				!strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validateLLM() error = %v, want field-specific error containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestSyncLocalModelCache(t *testing.T) {
+	t.Setenv("LOCAL_MODEL_ENABLED", "true")
+	t.Setenv(localModelJobNamespaceEnv, "")
+	scheme := localModelCacheTestScheme(t)
+
+	params := components.VllmCustomSpec{
+		ModelURI: "hf://org/model",
+		LocalModelCache: &components.LocalModelCacheSpec{
+			Enabled:            components.LocalModelCacheEnabled,
+			ModelSize:          "2Gi",
+			NodeGroup:          "model-workers",
+			ServiceAccountName: "model-puller",
+		},
+	}
+	inst := llmContext(t, nil, params, llm.LlmTopologyParameters{}).Instance()
+	serviceAccount := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "model-puller",
+			Namespace:   defaultLocalModelJobNamespace,
+			Annotations: map[string]string{localModelInstanceNamespaceAnnotation: inst.Namespace},
+		},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(serviceAccount).Build()
+	c := controller.NewContext(context.Background(), cl, inst, common.ProviderName)
+
+	ready, err := syncLocalModelCache(c, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ready {
+		t.Fatal("new cache should be ready for workload reconciliation")
+	}
+	cache := unstructuredObject(localModelNamespaceCacheGVK)
+	if err := cl.Get(context.Background(), client.ObjectKey{Name: "llama", Namespace: "ns"}, cache); err != nil {
+		t.Fatal(err)
+	}
+	spec, found, err := unstructured.NestedMap(cache.Object, "spec")
+	if err != nil || !found {
+		t.Fatalf("cache spec not found: found=%v err=%v", found, err)
+	}
+	if got := spec["sourceModelUri"]; got != "hf://org/model" {
+		t.Fatalf("sourceModelUri = %#v", got)
+	}
+	if got := spec["modelSize"]; got != "2Gi" {
+		t.Fatalf("modelSize = %#v", got)
+	}
+	if got := spec["nodeGroups"]; !slices.Equal(got.([]any), []any{"model-workers"}) {
+		t.Fatalf("nodeGroups = %#v", got)
+	}
+	if got := spec["serviceAccountName"]; got != "model-puller" {
+		t.Fatalf("serviceAccountName = %#v", got)
+	}
+	if len(cache.GetOwnerReferences()) != 1 || cache.GetOwnerReferences()[0].Name != "llama" {
+		t.Fatalf("ownerReferences = %#v", cache.GetOwnerReferences())
+	}
+	llmisvc := &kservev1alpha2.LLMInferenceService{ObjectMeta: metav1.ObjectMeta{Name: "llama", Namespace: "ns"}}
+	if err := cl.Create(context.Background(), llmisvc); err != nil {
+		t.Fatal(err)
+	}
+
+	disabled := params
+	disabled.LocalModelCache = nil
+	ready, err = syncLocalModelCache(c, disabled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready {
+		t.Fatal("workload removal should defer cache reconciliation")
+	}
+	if err := cl.Get(context.Background(), client.ObjectKey{Name: "llama", Namespace: "ns"}, cache); err != nil {
+		t.Fatalf("cache should remain until the workload is gone: %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKey{Name: "llama", Namespace: "ns"}, llmisvc); !apierrors.IsNotFound(err) {
+		t.Fatalf("workload after disabling cache: %v", err)
+	}
+
+	ready, err = syncLocalModelCache(c, disabled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready {
+		t.Fatal("cache removal should defer workload reconciliation")
+	}
+	if err := cl.Get(context.Background(), client.ObjectKey{Name: "llama", Namespace: "ns"}, cache); !apierrors.IsNotFound(err) {
+		t.Fatalf("cache after disable: %v", err)
+	}
+	ready, err = syncLocalModelCache(c, disabled)
+	if err != nil || !ready {
+		t.Fatalf("disabled cache after cleanup: ready=%v err=%v", ready, err)
+	}
+}
+
+func TestSyncLocalModelCacheRejectsUnauthorizedServiceAccountBeforeMutation(t *testing.T) {
+	t.Setenv("LOCAL_MODEL_ENABLED", "true")
+	t.Setenv(localModelJobNamespaceEnv, "")
+	scheme := localModelCacheTestScheme(t)
+	params := components.VllmCustomSpec{
+		ModelURI: "hf://org/new",
+		LocalModelCache: &components.LocalModelCacheSpec{
+			Enabled:            components.LocalModelCacheEnabled,
+			ModelSize:          "2Gi",
+			NodeGroup:          "model-workers",
+			ServiceAccountName: "missing-puller",
+		},
+	}
+	inst := llmContext(t, nil, params, llm.LlmTopologyParameters{}).Instance()
+	cache := localModelNamespaceCacheForTest("hf://org/old")
+	controlLocalModelNamespaceCache(cache, inst)
+	llmisvc := &kservev1alpha2.LLMInferenceService{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        inst.Name,
+			Namespace:   inst.Namespace,
+			Annotations: map[string]string{"test": "unchanged"},
+		},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cache, llmisvc).Build()
+	c := controller.NewContext(context.Background(), cl, inst, common.ProviderName)
+
+	ready, err := syncLocalModelCache(c, params)
+	if err == nil || !strings.Contains(err.Error(), "llmEngine.parameters.localModelCache.serviceAccountName") ||
+		!strings.Contains(err.Error(), "was not found") {
+		t.Fatalf("syncLocalModelCache() error = %v, want missing ServiceAccount error", err)
+	}
+	if ready {
+		t.Fatal("unauthorized cache request should not be ready")
+	}
+
+	gotCache := unstructuredObject(localModelNamespaceCacheGVK)
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(cache), gotCache); err != nil {
+		t.Fatalf("owned cache was removed: %v", err)
+	}
+	sourceURI, _, err := unstructured.NestedString(gotCache.Object, "spec", "sourceModelUri")
+	if err != nil || sourceURI != "hf://org/old" {
+		t.Fatalf("owned cache changed: sourceModelUri=%q err=%v", sourceURI, err)
+	}
+	gotLLM := &kservev1alpha2.LLMInferenceService{}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(llmisvc), gotLLM); err != nil {
+		t.Fatalf("LLMInferenceService was removed: %v", err)
+	}
+	if gotLLM.Annotations["test"] != "unchanged" {
+		t.Fatalf("LLMInferenceService changed: annotations=%v", gotLLM.Annotations)
+	}
+}
+
+func TestSyncLocalModelCacheReplacesImmutableURI(t *testing.T) {
+	t.Setenv("LOCAL_MODEL_ENABLED", "true")
+	scheme := runtime.NewScheme()
+	if err := corev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := kservev1alpha2.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	cache := unstructuredObject(localModelNamespaceCacheGVK)
+	cache.SetName("llama")
+	cache.SetNamespace("ns")
+	cache.Object["spec"] = map[string]any{
+		"sourceModelUri": "hf://org/old",
+		"modelSize":      "1Gi",
+		"nodeGroups":     []any{"model-workers"},
+	}
+	params := components.VllmCustomSpec{
+		ModelURI: "hf://org/new",
+		LocalModelCache: &components.LocalModelCacheSpec{
+			Enabled:   components.LocalModelCacheEnabled,
+			ModelSize: "2Gi",
+			NodeGroup: "model-workers",
+		},
+	}
+	inst := llmContext(t, nil, params, llm.LlmTopologyParameters{}).Instance()
+	controlLocalModelNamespaceCache(cache, inst)
+	llmisvc := &kservev1alpha2.LLMInferenceService{ObjectMeta: metav1.ObjectMeta{Name: "llama", Namespace: "ns"}}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cache, llmisvc).Build()
+	c := controller.NewContext(context.Background(), cl, inst, common.ProviderName)
+
+	ready, err := syncLocalModelCache(c, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready {
+		t.Fatal("immutable URI replacement should wait for the next reconcile")
+	}
+	if err := cl.Get(context.Background(), client.ObjectKey{Name: "llama", Namespace: "ns"}, cache); err != nil {
+		t.Fatalf("cache should remain until the workload is gone: %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKey{Name: "llama", Namespace: "ns"}, llmisvc); !apierrors.IsNotFound(err) {
+		t.Fatalf("workload after URI change: %v", err)
+	}
+	ready, err = syncLocalModelCache(c, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready {
+		t.Fatal("cache removal should defer workload reconciliation")
+	}
+	if err := cl.Get(context.Background(), client.ObjectKey{Name: "llama", Namespace: "ns"}, cache); !apierrors.IsNotFound(err) {
+		t.Fatalf("cache after URI change: %v", err)
+	}
+	ready, err = syncLocalModelCache(c, params)
+	if err != nil || !ready {
+		t.Fatalf("replacement cache: ready=%v err=%v", ready, err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKey{Name: "llama", Namespace: "ns"}, cache); err != nil {
+		t.Fatal(err)
+	}
+	sourceURI, _, err := unstructured.NestedString(cache.Object, "spec", "sourceModelUri")
+	if err != nil || sourceURI != "hf://org/new" {
+		t.Fatalf("replacement sourceModelUri=%q err=%v", sourceURI, err)
+	}
+}
+
+func TestSyncLocalModelCacheChartDisabledCleanup(t *testing.T) {
+	t.Setenv("LOCAL_MODEL_ENABLED", "false")
+
+	t.Run("stages workload before cache", func(t *testing.T) {
+		scheme := localModelCacheTestScheme(t)
+		params := components.VllmCustomSpec{ModelURI: "hf://org/model"}
+		inst := llmContext(t, nil, params, llm.LlmTopologyParameters{}).Instance()
+		cache := localModelNamespaceCacheForTest(params.ModelURI)
+		controlLocalModelNamespaceCache(cache, inst)
+		llmisvc := &kservev1alpha2.LLMInferenceService{
+			ObjectMeta: metav1.ObjectMeta{Name: inst.Name, Namespace: inst.Namespace},
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cache, llmisvc).Build()
+		c := controller.NewContext(context.Background(), cl, inst, common.ProviderName)
+
+		ready, err := syncLocalModelCache(c, params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ready {
+			t.Fatal("workload deletion should defer cache cleanup")
+		}
+		if err := cl.Get(context.Background(), client.ObjectKeyFromObject(cache), cache); err != nil {
+			t.Fatalf("cache should remain during workload deletion: %v", err)
+		}
+		if err := cl.Get(context.Background(), client.ObjectKeyFromObject(llmisvc), llmisvc); !apierrors.IsNotFound(err) {
+			t.Fatalf("workload after first cleanup reconcile: %v", err)
+		}
+
+		ready, err = syncLocalModelCache(c, params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ready {
+			t.Fatal("cache deletion should defer workload reconciliation")
+		}
+		if err := cl.Get(context.Background(), client.ObjectKeyFromObject(cache), cache); !apierrors.IsNotFound(err) {
+			t.Fatalf("cache after second cleanup reconcile: %v", err)
+		}
+
+		ready, err = syncLocalModelCache(c, params)
+		if err != nil || !ready {
+			t.Fatalf("cleanup completion: ready=%v err=%v", ready, err)
+		}
+	})
+
+	t.Run("absent CRD is harmless", func(t *testing.T) {
+		scheme := localModelCacheTestScheme(t)
+		params := components.VllmCustomSpec{ModelURI: "hf://org/model"}
+		inst := llmContext(t, nil, params, llm.LlmTopologyParameters{}).Instance()
+		cl := noMatchLocalModelClient{
+			Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		}
+		c := controller.NewContext(context.Background(), cl, inst, common.ProviderName)
+
+		ready, err := syncLocalModelCache(c, params)
+		if err != nil || !ready {
+			t.Fatalf("cleanup without CRD: ready=%v err=%v", ready, err)
+		}
+	})
+
+	t.Run("enable request still fails", func(t *testing.T) {
+		scheme := localModelCacheTestScheme(t)
+		params := components.VllmCustomSpec{
+			ModelURI: "hf://org/model",
+			LocalModelCache: &components.LocalModelCacheSpec{
+				Enabled:   components.LocalModelCacheEnabled,
+				ModelSize: "2Gi",
+				NodeGroup: "model-workers",
+			},
+		}
+		inst := llmContext(t, nil, params, llm.LlmTopologyParameters{}).Instance()
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		c := controller.NewContext(context.Background(), cl, inst, common.ProviderName)
+
+		ready, err := syncLocalModelCache(c, params)
+		if err == nil || !strings.Contains(err.Error(), "local model cache requires") {
+			t.Fatalf("syncLocalModelCache() error = %v, want chart support error", err)
+		}
+		if ready {
+			t.Fatal("unsupported cache request should not be ready")
+		}
+	})
+}
+
+func TestProviderCleanupStagesLocalModelCacheAfterWorkload(t *testing.T) {
+	t.Setenv("LOCAL_MODEL_ENABLED", "false")
+	scheme := localModelCacheTestScheme(t)
+	params := components.VllmCustomSpec{ModelURI: "hf://org/model"}
+	inst := llmContext(t, nil, params, llm.LlmTopologyParameters{}).Instance()
+	cache := localModelNamespaceCacheForTest(params.ModelURI)
+	controlLocalModelNamespaceCache(cache, inst)
+	llmisvc := &kservev1alpha2.LLMInferenceService{
+		ObjectMeta: metav1.ObjectMeta{Name: inst.Name, Namespace: inst.Namespace},
+	}
+	config := &kservev1alpha2.LLMInferenceServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: instanceConfigName(inst.Name), Namespace: inst.Namespace},
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: aiGatewayKeySecretName(inst.Name), Namespace: inst.Namespace},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cache, llmisvc, config, secret).Build()
+	c := controller.NewContext(context.Background(), cl, inst, common.ProviderName)
+
+	if err := (&Provider{}).Cleanup(c); !controller.IsWaitError(err) {
+		t.Fatalf("first Cleanup error = %v, want wait error", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(llmisvc), llmisvc); !apierrors.IsNotFound(err) {
+		t.Fatalf("workload after first Cleanup: %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(cache), cache); err != nil {
+		t.Fatalf("cache should remain during workload deletion: %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(config), config); !apierrors.IsNotFound(err) {
+		t.Fatalf("LLM config after first Cleanup: %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(secret), secret); !apierrors.IsNotFound(err) {
+		t.Fatalf("API key secret after first Cleanup: %v", err)
+	}
+
+	if err := (&Provider{}).Cleanup(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(cache), cache); !apierrors.IsNotFound(err) {
+		t.Fatalf("cache after second Cleanup: %v", err)
+	}
+}
+
+func TestLocalModelCacheOwnershipProtection(t *testing.T) {
+	t.Setenv("LOCAL_MODEL_ENABLED", "true")
+	operations := []struct {
+		name         string
+		cacheURI     string
+		desiredURI   string
+		withWorkload bool
+		cleanup      bool
+	}{
+		{name: "apply", cacheURI: "hf://org/model", desiredURI: "hf://org/model"},
+		{name: "replace", cacheURI: "hf://org/old", desiredURI: "hf://org/new", withWorkload: true},
+		{name: "delete", cacheURI: "hf://org/model", desiredURI: "hf://org/model", cleanup: true},
+	}
+	owners := []struct {
+		name    string
+		foreign bool
+		wantErr string
+	}{
+		{name: "unowned", wantErr: "is not controller-owned"},
+		{name: "foreign", foreign: true, wantErr: "not Instance"},
+	}
+
+	for _, operation := range operations {
+		for _, owner := range owners {
+			t.Run(operation.name+"/"+owner.name, func(t *testing.T) {
+				scheme := localModelCacheTestScheme(t)
+				params := components.VllmCustomSpec{
+					ModelURI: operation.desiredURI,
+					LocalModelCache: &components.LocalModelCacheSpec{
+						Enabled:   components.LocalModelCacheEnabled,
+						ModelSize: "2Gi",
+						NodeGroup: "model-workers",
+					},
+				}
+				inst := llmContext(t, nil, params, llm.LlmTopologyParameters{}).Instance()
+				cache := localModelNamespaceCacheForTest(operation.cacheURI)
+				if owner.foreign {
+					cache.SetOwnerReferences([]metav1.OwnerReference{{
+						APIVersion: "core.openeverest.io/v1alpha1",
+						Kind:       "Instance",
+						Name:       inst.Name,
+						UID:        "other-instance-uid",
+						Controller: ptr.To(true),
+					}})
+				}
+				objects := []client.Object{cache}
+				llmisvc := &kservev1alpha2.LLMInferenceService{
+					ObjectMeta: metav1.ObjectMeta{Name: inst.Name, Namespace: inst.Namespace},
+				}
+				if operation.withWorkload {
+					objects = append(objects, llmisvc)
+				}
+				cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+				c := controller.NewContext(context.Background(), cl, inst, common.ProviderName)
+
+				var err error
+				if operation.cleanup {
+					err = (&Provider{}).Cleanup(c)
+				} else {
+					_, err = syncLocalModelCache(c, params)
+				}
+				if err == nil || !strings.Contains(err.Error(), owner.wantErr) {
+					t.Fatalf("operation error = %v, want containing %q", err, owner.wantErr)
+				}
+
+				stored := unstructuredObject(localModelNamespaceCacheGVK)
+				if err := cl.Get(context.Background(), client.ObjectKeyFromObject(cache), stored); err != nil {
+					t.Fatalf("foreign cache should remain: %v", err)
+				}
+				sourceURI, _, err := unstructured.NestedString(stored.Object, "spec", "sourceModelUri")
+				if err != nil || sourceURI != operation.cacheURI {
+					t.Fatalf("sourceModelUri=%q err=%v, want %q", sourceURI, err, operation.cacheURI)
+				}
+				modelSize, _, err := unstructured.NestedString(stored.Object, "spec", "modelSize")
+				if err != nil || modelSize != "1Gi" {
+					t.Fatalf("modelSize=%q err=%v, want unchanged", modelSize, err)
+				}
+				if owner.foreign {
+					refs := stored.GetOwnerReferences()
+					if len(refs) != 1 || refs[0].UID != "other-instance-uid" {
+						t.Fatalf("ownerReferences=%v, want foreign owner unchanged", refs)
+					}
+				} else if len(stored.GetOwnerReferences()) != 0 {
+					t.Fatalf("ownerReferences=%v, want unowned cache unchanged", stored.GetOwnerReferences())
+				}
+				if operation.withWorkload {
+					if err := cl.Get(context.Background(), client.ObjectKeyFromObject(llmisvc), llmisvc); err != nil {
+						t.Fatalf("workload should remain after rejected replacement: %v", err)
+					}
+				}
+			})
+		}
+	}
 }
 
 func TestValidateWorkloadScaling(t *testing.T) {
@@ -1041,6 +1645,126 @@ func TestUnservedWorkload(t *testing.T) {
 			t.Parallel()
 			if got := unservedWorkload(tt.ws); got != tt.want {
 				t.Fatalf("unservedWorkload() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStatusLLMLocalModelCache(t *testing.T) {
+	t.Parallel()
+
+	readyURL, err := apis.ParseURL("https://llama.example.com/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newLLM := func(labels map[string]string) *kservev1alpha2.LLMInferenceService {
+		return &kservev1alpha2.LLMInferenceService{
+			ObjectMeta: metav1.ObjectMeta{Name: "llama", Namespace: "ns", Labels: labels},
+			Status: kservev1alpha2.LLMInferenceServiceStatus{
+				URL: readyURL,
+				Status: duckv1.Status{Conditions: duckv1.Conditions{{
+					Type:   apis.ConditionReady,
+					Status: corev1.ConditionTrue,
+				}}},
+				Workloads: &kservev1alpha2.WorkloadStatus{
+					Primary: &kservev1alpha2.ObservedWorkloadStatus{
+						TypedLocalObjectReference: corev1.TypedLocalObjectReference{Kind: "Deployment", Name: "llama-kserve"},
+						ReadyReplicas:             ptr.To[int32](1),
+					},
+				},
+			},
+		}
+	}
+	copies := func(available, total, failed int64) map[string]any {
+		return map[string]any{"available": available, "total": total, "failed": failed}
+	}
+	newCache := func(kind, name, namespace string, modelCopies map[string]any) client.Object {
+		cache := unstructuredObject(schema.GroupVersionKind{
+			Group: "serving.kserve.io", Version: "v1alpha1", Kind: kind,
+		})
+		cache.SetName(name)
+		cache.SetNamespace(namespace)
+		if modelCopies != nil {
+			cache.Object["status"] = map[string]any{"copies": modelCopies}
+		}
+		return cache
+	}
+
+	tests := []struct {
+		name    string
+		labels  map[string]string
+		cache   client.Object
+		message string
+	}{
+		{
+			name:    "cluster cache ready",
+			labels:  map[string]string{constants.LocalModelLabel: "qwen"},
+			cache:   newCache("LocalModelCache", "qwen", "", copies(3, 3, 0)),
+			message: `Model cache "qwen": 3/3 nodes ready`,
+		},
+		{
+			name: "namespace cache downloading",
+			labels: map[string]string{
+				constants.LocalModelLabel:          "qwen",
+				constants.LocalModelNamespaceLabel: "ns",
+			},
+			cache:   newCache("LocalModelNamespaceCache", "qwen", "ns", copies(1, 3, 0)),
+			message: `Model cache "qwen": 1/3 nodes ready`,
+		},
+		{
+			name:    "cache download failures",
+			labels:  map[string]string{constants.LocalModelLabel: "qwen"},
+			cache:   newCache("LocalModelCache", "qwen", "", copies(1, 3, 2)),
+			message: `Model cache "qwen": 1/3 nodes ready, 2 failed`,
+		},
+		{
+			name:    "cache preparing",
+			labels:  map[string]string{constants.LocalModelLabel: "qwen"},
+			cache:   newCache("LocalModelCache", "qwen", "", nil),
+			message: `Model cache "qwen" is preparing`,
+		},
+		{
+			name:    "stale cache reference",
+			labels:  map[string]string{constants.LocalModelLabel: "missing"},
+			message: `Model cache "missing" not found`,
+		},
+		{
+			name: "no cache",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			for _, addToScheme := range []func(*runtime.Scheme) error{
+				corev1alpha1.AddToScheme,
+				kservev1alpha2.AddToScheme,
+			} {
+				if err := addToScheme(scheme); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			objects := []client.Object{newLLM(tt.labels)}
+			if tt.cache != nil {
+				objects = append(objects, tt.cache)
+			}
+			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			inst := llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{}).Instance()
+			c := controller.NewContext(context.Background(), cl, inst, common.ProviderName)
+
+			got, err := (&Provider{}).statusLLM(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Phase != corev1alpha1.InstancePhaseReady {
+				t.Fatalf("phase = %q, want Ready", got.Phase)
+			}
+			if got.Message != tt.message {
+				t.Fatalf("message = %q, want %q", got.Message, tt.message)
+			}
+			if got.ConnectionDetails.Host != "llama.example.com" || got.ConnectionDetails.Port != "443" {
+				t.Fatalf("connection details = %#v, want original HTTPS endpoint", got.ConnectionDetails)
 			}
 		})
 	}

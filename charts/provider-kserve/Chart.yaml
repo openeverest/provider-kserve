@@ -52,6 +52,13 @@ dependencies:
     version: "v0.21.0"
     repository: "oci://ghcr.io/kserve/charts"
     condition: kserveLlmisvcResources.enabled
+  # Optional KServe LocalModel controller and node agent. Enabled by the same
+  # value that turns on LocalModel admission in kserve-resources.
+  - name: kserve-localmodel-resources
+    alias: kserveLocalmodelResources
+    version: "v0.21.0"
+    repository: "oci://ghcr.io/kserve/charts"
+    condition: kserveResources.kserve.localmodel.enabled
   # Optional Envoy data-plane controller. Agent Router (formerly Envoy AI
   # Gateway) v1.2 requires Envoy Gateway v1.9+ (Gateway API v1.6 CRDs) and the
   # xDS extension-manager integration configured in values.yaml.

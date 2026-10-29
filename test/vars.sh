@@ -7,4 +7,6 @@ echo "PROVIDER_ROOT_PATH=${PROVIDER_ROOT_PATH}"
 ## Default version bundle exercised by the tests. Keep in sync with the
 ## provider's default version bundle (definition/versions.yaml).
 export KSERVE_VERSION_BUNDLE=${KSERVE_VERSION_BUNDLE:-"0.21"}
+export PROVIDER_NAMESPACE=${PROVIDER_NAMESPACE:-"default"}
+echo "PROVIDER_NAMESPACE=${PROVIDER_NAMESPACE}"
 echo "KSERVE_VERSION_BUNDLE=${KSERVE_VERSION_BUNDLE}"

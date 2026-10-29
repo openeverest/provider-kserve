@@ -37,6 +37,23 @@ type LoRASpec struct {
 	MaxCpuAdapters *int32 `json:"maxCpuAdapters,omitempty"`
 }
 
+// LocalModelCacheSpec configures an Instance-owned KServe
+// LocalModelNamespaceCache for the base model.
+type LocalModelCacheSpec struct {
+	// Enabled selects whether the cache is maintained: "disabled" (default) or "enabled".
+	Enabled string `json:"enabled,omitempty"`
+
+	// ModelSize is the storage required for one model copy, for example "10Gi".
+	ModelSize string `json:"modelSize,omitempty"`
+
+	// NodeGroup names the existing LocalModelNodeGroup that stores the model.
+	NodeGroup string `json:"nodeGroup,omitempty"`
+
+	// ServiceAccountName optionally names the download ServiceAccount in the
+	// KServe LocalModel jobs namespace.
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+}
+
 // VllmEngineSpec holds the vLLM engine settings users change most often. Each
 // set field becomes one `vllm serve` flag; empty fields keep vLLM's default.
 type VllmEngineSpec struct {
@@ -90,6 +107,10 @@ type VllmCustomSpec struct {
 	// ModelName is the name advertised in the "model" field of inference requests.
 	// Defaults to the Instance name when empty.
 	ModelName string `json:"modelName,omitempty"`
+
+	// LocalModelCache creates a namespace-scoped cache for ModelURI. The node
+	// group and optional download ServiceAccount must already exist.
+	LocalModelCache *LocalModelCacheSpec `json:"localModelCache,omitempty"`
 
 	// TensorParallelSize configures vLLM tensor parallelism (maps to the runtime
 	// --tensor-parallel-size). Use for models that span multiple GPUs on a node.
@@ -205,6 +226,11 @@ type VllmCustomSpec struct {
 const (
 	LoraDeploymentDisabled = "disabled"
 	LoraDeploymentEnabled  = "enabled"
+)
+
+const (
+	LocalModelCacheDisabled = "disabled"
+	LocalModelCacheEnabled  = "enabled"
 )
 
 const (

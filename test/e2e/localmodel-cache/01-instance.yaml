@@ -1,0 +1,25 @@
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: cached-smollm
+spec:
+  providerRef:
+    name: provider-kserve
+  topology:
+    type: llm
+  components:
+    llmEngine:
+      type: vllm
+      replicas: 1
+      resources:
+        limits:
+          cpu: "2"
+          memory: 2Gi
+      parameters:
+        modelURI: hf://HuggingFaceTB/SmolLM2-135M-Instruct
+        modelName: smollm2-135m-instruct
+        computeProfile: cpu
+        localModelCache:
+          enabled: enabled
+          modelSize: 1Gi
+          nodeGroup: localmodel-e2e

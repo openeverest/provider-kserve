@@ -34,6 +34,9 @@ jobs:
       - name: Unit Tests
         run: make test
 
+      - name: Helm Tests
+        run: make test-helm
+
   verify:
     name: Verify Generated Files
     runs-on: ubuntu-latest

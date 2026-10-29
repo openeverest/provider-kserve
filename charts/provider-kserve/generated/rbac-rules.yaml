@@ -134,6 +134,7 @@
     - serving.kserve.io
   resources:
     - clusterstoragecontainers
+    - localmodelcaches
   verbs:
     - get
     - list
@@ -144,6 +145,7 @@
     - inferenceservices
     - llminferenceserviceconfigs
     - llminferenceservices
+    - localmodelnamespacecaches
   verbs:
     - create
     - delete

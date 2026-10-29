@@ -61,6 +61,8 @@ jobs:
 
       - name: Bootstrap cluster (OpenEverest core + provider)
         run: tilt ci -f dev/Tiltfile
+        env:
+          ENABLE_LOCAL_MODEL: "true"
 
       - name: Run e2e tests
         run: make test-e2e

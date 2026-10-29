@@ -76,20 +76,25 @@ See `examples/instance-llm-lora.yaml`.
 
 ## 2.3 Pre-pull / cache model weights on nodes
 
-**Status:** Supported (`llm`) through OCI model images; `LocalModelCache` is not
-wired up yet ([#108](https://github.com/openeverest/provider-kserve/issues/108)).
+Status: Supported through OCI model images and the optional KServe LocalModel controller.
 
-As an ML engineer, I want large weights pre-pulled and cached on nodes, so that
-new replicas start fast and I do not re-download gigabytes on every rollout.
+As an ML engineer, I want large weights cached on selected nodes. New replicas
+can then start without downloading the same model again.
 
-**Acceptance criteria**
-- A model can be cached on nodes (OCI model image / LocalModelCache / PVC).
-- A restart, rollout or new replica on a node that has the model does not
-  download it again.
-- Cold-start time for a new replica drops to node-local read speed.
+Acceptance criteria
+- A model can be cached on nodes through an OCI model image or `LocalModelNamespaceCache`.
+- A restart, rollout, or new replica on a node that has the model does not download it again.
+- An administrator prepares LocalModel node groups with Kubernetes YAML.
+- An ML engineer enables and manages an Instance namespace cache in the provider-driven OpenEverest form.
+- Kubernetes YAML and GitOps remain supported.
+- KServe matches the Instance model URI to a cache automatically.
+- The Instance status shows available, total, and failed node copies.
+- A cached model Pod mounts the cache PVC without a storage-initializer container.
 
-**Provider mapping** — package the model as an image; the kubelet caches it per
-node. See "OCI model images" in the README and `examples/instance-llm-oci.yaml`.
+Provider mapping
+
+For OCI model images, package the model as an image. See "OCI model images" in the README and `examples/instance-llm-oci.yaml`.
+
 ```yaml
 components:
   llmEngine:
@@ -98,13 +103,40 @@ components:
       imagePullSecret: registry-pull   # private registry only
 ```
 
-A model already on the node (e.g. staged by a `LocalModelCache`) can be served
-with `disableStorageInitializer: true`, which skips model attachment entirely;
-it must stay off for OCI images.
+For KServe LocalModel caching, enable the chart feature and configure the Instance cache.
 
-**Gap to close:** expose a `LocalModelCache` reference (or a `cache: true`
-convenience) so the provider provisions the cache rather than requiring the
-model to be staged out-of-band.
+```yaml
+# Helm values
+kserveResources:
+  kserve:
+    localmodel:
+      enabled: true
+
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: qwen3-4b
+  namespace: models
+spec:
+  providerRef:
+    name: provider-kserve
+  topology:
+    type: llm
+  components:
+    llmEngine:
+      type: vllm
+      parameters:
+        modelURI: hf://Qwen/Qwen3-4B
+        localModelCache:
+          enabled: enabled
+          modelSize: 10Gi
+          nodeGroup: model-workers
+```
+
+The provider creates and owns the `LocalModelNamespaceCache`. Leave `disableStorageInitializer` unset. KServe uses the storage initialization path to replace the URI with the cached PVC. It must remain disabled only for OCI images.
+
+See `docs/local-model-cache.md` and `examples/local-model-cache.yaml`.
 
 ---
 

@@ -64,6 +64,9 @@ enable_seaweedfs = str2bool(os.getenv('ENABLE_SEAWEEDFS', 'false'))
 # from dev/resources/ai-gateway-llm.yaml.
 enable_ai_gateway = str2bool(os.getenv('ENABLE_AI_GATEWAY', 'false'))
 
+# Whether to install KServe LocalModel for node-local model cache tests.
+enable_local_model = str2bool(os.getenv('ENABLE_LOCAL_MODEL', 'false'))
+
 # Whether to install kube-prometheus-stack (Prometheus + Grafana) and provision
 # the vLLM Grafana dashboard so model metrics are visible end-to-end.
 enable_metrics = str2bool(os.getenv('ENABLE_METRICS', 'false'))
@@ -304,6 +307,10 @@ if enable_ai_gateway:
         '--set', 'envoy-ai-gateway.enabled=true',
         # The local gateway has no TLS; API keys are still required.
         '--set', 'aiGateway.auth.allowInsecureHTTP=true',
+    ]
+if enable_local_model:
+    provider_flags = provider_flags + [
+        '--set', 'kserveResources.kserve.localmodel.enabled=true',
     ]
 if enable_metrics:
     # Labeled ConfigMaps for kube-prometheus-stack Grafana sidecar (see

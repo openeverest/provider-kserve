@@ -133,7 +133,7 @@ docker-push: ## Push docker image.
 # KServe CRD charts, for clusters that set kserveCRDs.install=false and manage
 # the CRDs as their own Helm releases. Version follows the KServe controller
 # charts pinned in Chart.yaml.
-KSERVE_CRD_CHARTS ?= kserve-crd kserve-llmisvc-crd
+KSERVE_CRD_CHARTS ?= kserve-crd kserve-llmisvc-crd kserve-localmodel-crd
 
 .PHONY: helm-deps
 helm-deps: ## Download/update Helm chart dependencies.
@@ -165,6 +165,10 @@ helm-template: helm-deps ## Render Helm chart templates locally (dry-run).
 	helm template provider-kserve $(CHART_DIR)
 
 ##@ Testing
+
+.PHONY: test-helm
+test-helm: helm-deps yq ## Verify optional chart features render correctly.
+	CHART_DIR=$(CHART_DIR) YQ=$(YQ) ./test/helm-localmodel.sh
 
 .PHONY: test-reconcile
 test-reconcile: ## Run the fast reconcile tests (chainsaw) against a running cluster.

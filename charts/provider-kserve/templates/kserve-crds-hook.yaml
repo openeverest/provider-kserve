@@ -3,10 +3,14 @@
 {{- if not $version }}
 {{- range .Chart.Dependencies }}
 {{- /* Helm rewrites a dependency's Name to its alias and drops disabled ones; all KServe subcharts share one version. */}}
-{{- if and (not $version) (has .Name (list "kserveResources" "kserveLlmisvcResources")) }}{{- $version = .Version }}{{- end }}
+{{- if and (not $version) (has .Name (list "kserveResources" "kserveLlmisvcResources" "kserveLocalmodelResources")) }}{{- $version = .Version }}{{- end }}
 {{- end }}
 {{- end }}
 {{- if not $version }}{{ fail "kserveCRDs: set kserveCRDs.version (no KServe subchart enabled)" }}{{- end }}
+{{- $charts := .Values.kserveCRDs.charts }}
+{{- if and .Values.kserveResources.kserve.localmodel.enabled (not (has "kserve-localmodel-crd" $charts)) }}
+{{- $charts = append $charts "kserve-localmodel-crd" }}
+{{- end }}
 {{- $name := printf "%s-kserve-crds" (include "provider-kserve.fullname" .) | trunc 63 | trimSuffix "-" }}
 apiVersion: v1
 kind: ServiceAccount
@@ -128,7 +132,7 @@ spec:
                 return 1
               }
               applied=""
-              for chart in {{ join " " .Values.kserveCRDs.charts }}; do
+              for chart in {{ join " " $charts }}; do
                 echo "Applying ${REGISTRY}/${chart}:${VERSION}"
                 fetch "${chart}"
                 applied="${applied} $(kubectl apply --server-side --force-conflicts --field-manager=provider-kserve-crds -o name -f "/tmp/${chart}.yaml")"

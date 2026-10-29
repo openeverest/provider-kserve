@@ -473,6 +473,19 @@ kserveResources:
       enabled: true
     certManager:
       enabled: true
+    # -- Deploy KServe's LocalModel controller and node agent, and enable
+    # automatic cache matching for InferenceService and LLMInferenceService.
+    storage:
+      resources:
+        limits:
+          # -- LocalModel download Jobs use this KServe setting rather than
+          # storageInitializer.resources above.
+          memory: 4Gi
+    localmodel:
+      enabled: false
+      # -- Namespace where KServe runs model download Jobs and resolves their
+      # credential ServiceAccounts.
+      jobNamespace: kserve-localmodel-jobs
     controller:
       # -- Cluster-wide default deployment mode. Standard (formerly named
       # "RawDeployment") yields plain Kubernetes Deployments + HPA and avoids
@@ -495,10 +508,18 @@ kserveLlmisvcResources:
     controller:
       deploymentMode: Standard
 
+# -- KServe LocalModel controller and node agent. The dependency is included
+# when kserveResources.kserve.localmodel.enabled is true.
+kserveLocalmodelResources:
+  kserve:
+    # -- KServe image tag; keep in step with the chart versions in Chart.yaml
+    version: v0.21.0
+
 # -- KServe's ClusterServingRuntimes, which the InferenceService controller
 # selects from by model format (needed by the predictor topology). Vendored from
 # the kserve-runtime-configs chart by `make sync-kserve-objects` and applied by
 # the kserve-objects hook Job once the KServe webhooks serve.
+
 kserveRuntimeConfigs:
   # -- Apply the KServe ClusterServingRuntimes
   enabled: true

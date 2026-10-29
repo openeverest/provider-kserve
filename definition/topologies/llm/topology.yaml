@@ -342,6 +342,65 @@ ui:
       - gpuCount
       - resources
       - kvCacheSpaceGi
+    cache:
+      label: Model Cache
+      description: >-
+        Cache this model on nodes in an existing KServe LocalModelNodeGroup.
+        The provider creates a namespace cache owned by this instance. Disable
+        the cache to remove it. The LocalModel chart feature must be enabled.
+      components:
+        cacheEnabled:
+          uiType: select
+          path: spec.components.llmEngine.parameters.localModelCache.enabled
+          fieldParams:
+            label: Enable model cache
+            defaultValue: disabled
+            options:
+            - label: Disabled
+              value: disabled
+            - label: Enabled
+              value: enabled
+            helperText: >-
+              Reuses one downloaded model copy per matching node instead of
+              downloading the model for every Pod.
+        modelSize:
+          uiType: number
+          path: spec.components.llmEngine.parameters.localModelCache.modelSize
+          fieldParams:
+            label: Model size
+            badge: Gi
+            badgeToApi: true
+            helperText: Required storage for one model copy.
+          validation:
+            min: 1
+            celExpressions:
+            - celExpr: '!has(spec.components.llmEngine.parameters.localModelCache) || spec.components.llmEngine.parameters.localModelCache.enabled != "enabled" || has(spec.components.llmEngine.parameters.localModelCache.modelSize)'
+              message: Model size is required when model caching is enabled
+        nodeGroup:
+          uiType: text
+          path: spec.components.llmEngine.parameters.localModelCache.nodeGroup
+          fieldParams:
+            label: LocalModelNodeGroup
+            placeholder: model-workers
+            helperText: Existing cluster-scoped node group that supplies cache storage.
+          validation:
+            celExpressions:
+            - celExpr: '!has(spec.components.llmEngine.parameters.localModelCache) || spec.components.llmEngine.parameters.localModelCache.enabled != "enabled" || has(spec.components.llmEngine.parameters.localModelCache.nodeGroup)'
+              message: LocalModelNodeGroup is required when model caching is enabled
+        serviceAccountName:
+          uiType: text
+          path: spec.components.llmEngine.parameters.localModelCache.serviceAccountName
+          fieldParams:
+            label: Download service account
+            placeholder: model-puller
+            helperText: >-
+              Optional ServiceAccount for model credentials in the KServe
+              LocalModel jobs namespace.
+      componentsOrder:
+      - cacheEnabled
+      - modelSize
+      - nodeGroup
+      - serviceAccountName
     engine:
       label: Engine Tuning
       description: >-
@@ -940,6 +999,7 @@ ui:
   - basicInfo
   - scaling
   - runtime
+  - cache
   - engine
   - lora
   - routing

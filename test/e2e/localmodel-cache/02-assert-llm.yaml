@@ -1,0 +1,11 @@
+apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceService
+metadata:
+  name: cached-smollm
+  labels:
+    internal.serving.kserve.io/localmodel: cached-smollm
+  annotations:
+    internal.serving.kserve.io/localmodel-sourceuri: hf://HuggingFaceTB/SmolLM2-135M-Instruct
+spec:
+  model:
+    uri: hf://HuggingFaceTB/SmolLM2-135M-Instruct

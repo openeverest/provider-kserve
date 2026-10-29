@@ -1,0 +1,70 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-model
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: models
+---
+apiVersion: serving.kserve.io/v1alpha1
+kind: LocalModelNodeGroup
+metadata:
+  name: model-workers
+spec:
+  storageLimit: 10Gi
+  persistentVolumeClaimSpec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+    storageClassName: local-model
+  persistentVolumeSpec:
+    accessModes:
+      - ReadWriteOnce
+    capacity:
+      storage: 10Gi
+    storageClassName: local-model
+    local:
+      # This must equal the hostPath on kserve-localmodelnode-agent.
+      path: /models
+    nodeAffinity:
+      required:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kserve/localmodel
+                operator: In
+                values:
+                  - worker
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: smollm2-cached
+  namespace: models
+spec:
+  providerRef:
+    name: provider-kserve
+  topology:
+    type: llm
+  components:
+    llmEngine:
+      type: vllm
+      replicas: 1
+      resources:
+        limits:
+          cpu: "2"
+          memory: 6Gi
+      parameters:
+        modelURI: hf://HuggingFaceTB/SmolLM2-135M-Instruct
+        modelName: smollm2-135m-instruct
+        computeProfile: cpu
+        # Leave disableStorageInitializer unset. KServe uses that path to mount the cache.
+        localModelCache:
+          enabled: enabled
+          modelSize: 1Gi
+          nodeGroup: model-workers

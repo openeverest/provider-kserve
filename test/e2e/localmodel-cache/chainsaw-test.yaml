@@ -1,0 +1,175 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: localmodel-cache
+spec:
+  description: |
+    Create an Instance-managed KServe namespace cache and prove replacement
+    Pods reuse the cached PVC without a storage initializer.
+  catch:
+    - script:
+        content: |
+          kubectl get localmodelnodegroup,localmodelnode,pv -o yaml
+          kubectl get localmodelnamespacecache -A -o yaml
+          kubectl get pods,jobs,pvc -A -o wide
+          kubectl -n "$NAMESPACE" get instance,llminferenceservice,deployment,pod -o yaml
+          kubectl -n "$PROVIDER_NAMESPACE" logs deployment/kserve-localmodel-controller-manager --tail=200 || true
+          kubectl -n "$PROVIDER_NAMESPACE" logs daemonset/kserve-localmodelnode-agent --tail=200 || true
+  steps:
+    - name: prepare-cache-node
+      try:
+        - script:
+            content: |
+              set -eu
+              set -- $(kubectl get nodes -o name)
+              node=${1#node/}
+              kubectl label node "$node" kserve/localmodel=worker --overwrite
+              kubectl -n "$PROVIDER_NAMESPACE" rollout status daemonset/kserve-localmodelnode-agent --timeout=180s
+        - apply:
+            file: 00-cache.yaml
+
+    - name: create-provider-cache
+      try:
+        - apply:
+            file: 01-instance.yaml
+        - script:
+            timeout: 10m
+            content: |
+              set -eu
+              attempt=0
+              while [ "$attempt" -lt 120 ]; do
+                available=$(kubectl -n "$NAMESPACE" get localmodelnamespacecache cached-smollm -o jsonpath='{.status.copies.available}' 2>/dev/null || true)
+                total=$(kubectl -n "$NAMESPACE" get localmodelnamespacecache cached-smollm -o jsonpath='{.status.copies.total}' 2>/dev/null || true)
+                owner=$(kubectl -n "$NAMESPACE" get localmodelnamespacecache cached-smollm -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null || true)
+                if [ "$available" = "1" ] && [ "$total" = "1" ] && [ "$owner" = "cached-smollm" ]; then
+                  exit 0
+                fi
+                attempt=$((attempt + 1))
+                sleep 5
+              done
+              kubectl -n "$NAMESPACE" get localmodelnamespacecache cached-smollm -o yaml
+              exit 1
+
+    - name: verify-matching-instance
+      try:
+        - assert:
+            file: 02-assert-llm.yaml
+        - script:
+            timeout: 5m
+            content: |
+              set -eu
+              attempt=0
+              while [ "$attempt" -lt 60 ]; do
+                deployment=$(kubectl -n "$NAMESPACE" get deployment -l internal.serving.kserve.io/localmodel=cached-smollm -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                if [ -n "$deployment" ]; then
+                  init_names=$(kubectl -n "$NAMESPACE" get deployment "$deployment" -o jsonpath='{.spec.template.spec.initContainers[*].name}')
+                  case " $init_names " in
+                    *" storage-initializer "*)
+                      echo "storage-initializer is present on cached workload" >&2
+                      exit 1
+                      ;;
+                  esac
+                  claims=$(kubectl -n "$NAMESPACE" get deployment "$deployment" -o jsonpath='{.spec.template.spec.volumes[*].persistentVolumeClaim.claimName}')
+                  if [ -z "$claims" ]; then
+                    echo "cached workload has no PVC volume" >&2
+                    exit 1
+                  fi
+                  cache_namespace=$(kubectl -n "$NAMESPACE" get llminferenceservice cached-smollm -o jsonpath='{.metadata.labels.internal\.serving\.kserve\.io/localmodel-namespace}')
+                  if [ "$cache_namespace" != "$NAMESPACE" ]; then
+                    echo "namespace cache label is $cache_namespace, want $NAMESPACE" >&2
+                    exit 1
+                  fi
+                  exit 0
+                fi
+                attempt=$((attempt + 1))
+                sleep 5
+              done
+              echo "cached workload deployment was not created" >&2
+              exit 1
+
+    - name: replace-pod-without-download
+      try:
+        - script:
+            timeout: 5m
+            content: |
+              set -eu
+              attempt=0
+              pod=""
+              while [ "$attempt" -lt 60 ]; do
+                pod=$(kubectl -n "$NAMESPACE" get pod -l internal.serving.kserve.io/localmodel=cached-smollm -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                [ -n "$pod" ] && break
+                attempt=$((attempt + 1))
+                sleep 5
+              done
+              [ -n "$pod" ] || { echo "cached workload Pod was not created" >&2; exit 1; }
+
+              old_uid=$(kubectl -n "$NAMESPACE" get pod "$pod" -o jsonpath='{.metadata.uid}')
+              before_jobs=$(kubectl -n kserve-localmodel-jobs get jobs -o name | wc -l | tr -d ' ')
+              kubectl -n "$NAMESPACE" delete pod "$pod" --wait=true
+
+              attempt=0
+              while [ "$attempt" -lt 60 ]; do
+                new_uid=$(kubectl -n "$NAMESPACE" get pod -l internal.serving.kserve.io/localmodel=cached-smollm -o jsonpath='{.items[0].metadata.uid}' 2>/dev/null || true)
+                if [ -n "$new_uid" ] && [ "$new_uid" != "$old_uid" ]; then
+                  break
+                fi
+                attempt=$((attempt + 1))
+                sleep 5
+              done
+              [ -n "${new_uid:-}" ] && [ "$new_uid" != "$old_uid" ] || { echo "replacement Pod was not created" >&2; exit 1; }
+
+              sleep 30
+              after_jobs=$(kubectl -n kserve-localmodel-jobs get jobs -o name | wc -l | tr -d ' ')
+              if [ "$after_jobs" != "$before_jobs" ]; then
+                echo "download Job count changed from $before_jobs to $after_jobs" >&2
+                exit 1
+              fi
+
+    - name: surface-cache-status
+      try:
+        - script:
+            timeout: 3m
+            content: |
+              set -eu
+              attempt=0
+              while [ "$attempt" -lt 36 ]; do
+                message=$(kubectl -n "$NAMESPACE" get instance cached-smollm -o jsonpath='{.status.message}' 2>/dev/null || true)
+                case "$message" in
+                  *'Model cache "cached-smollm": 1/1 nodes ready'*) exit 0 ;;
+                esac
+                attempt=$((attempt + 1))
+                sleep 5
+              done
+              echo "Instance did not report cache status" >&2
+              kubectl -n "$NAMESPACE" get instance cached-smollm -o yaml
+              exit 1
+
+    - name: disable-provider-cache
+      try:
+        - script:
+            timeout: 5m
+            content: |
+              set -eu
+              kubectl -n "$NAMESPACE" patch instance cached-smollm --type=merge \
+                -p '{"spec":{"components":{"llmEngine":{"parameters":{"localModelCache":{"enabled":"disabled"}}}}}}'
+              attempt=0
+              while [ "$attempt" -lt 60 ]; do
+                cache=$(kubectl -n "$NAMESPACE" get localmodelnamespacecache cached-smollm --ignore-not-found -o name)
+                label=$(kubectl -n "$NAMESPACE" get llminferenceservice cached-smollm -o jsonpath='{.metadata.labels.internal\.serving\.kserve\.io/localmodel}' 2>/dev/null || true)
+                if [ -z "$cache" ] && [ -z "$label" ]; then
+                  exit 0
+                fi
+                attempt=$((attempt + 1))
+                sleep 5
+              done
+              echo "Provider-managed cache was not cleanly disabled" >&2
+              kubectl -n "$NAMESPACE" get instance,llminferenceservice,localmodelnamespacecache -o yaml
+              exit 1
+
+    - name: remove-cache-node-label
+      try:
+        - script:
+            content: |
+              set -eu
+              set -- $(kubectl get nodes -l kserve/localmodel=worker -o name)
+              [ "$#" -eq 0 ] || kubectl label "$1" kserve/localmodel-

@@ -2,17 +2,26 @@ package provider
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/utils/ptr"
 	"knative.dev/pkg/apis"
 	"sigs.k8s.io/yaml"
 
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
+	"github.com/kserve/kserve/pkg/constants"
 
 	commonv1alpha1 "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
@@ -60,6 +69,19 @@ const (
 	// gpuLibraryPathEnv for the full rationale.
 	gpuLibraryPathEnvVar = "LIBRARY_PATH"
 	gpuLibraryPathValue  = "/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64"
+
+	localModelJobNamespaceEnv             = "LOCAL_MODEL_JOB_NAMESPACE"
+	defaultLocalModelJobNamespace         = "kserve-localmodel-jobs"
+	localModelInstanceNamespaceAnnotation = "openeverest.io/instance-namespace"
+)
+
+var (
+	localModelCacheGVK = schema.GroupVersionKind{
+		Group: "serving.kserve.io", Version: "v1alpha1", Kind: "LocalModelCache",
+	}
+	localModelNamespaceCacheGVK = schema.GroupVersionKind{
+		Group: "serving.kserve.io", Version: "v1alpha1", Kind: "LocalModelNamespaceCache",
+	}
 )
 
 // workloadPodSelector returns the label selector KServe stamps on an
@@ -211,7 +233,103 @@ func validateLLM(c *controller.Context) error {
 			return err
 		}
 	}
+	if err := validateLocalModelCache(params); err != nil {
+		return err
+	}
+	if err := authorizeLocalModelCacheServiceAccount(c, params); err != nil {
+		return err
+	}
 	return validateLoRAParams(c.Name(), params)
+}
+
+func localModelCacheEnabled(cache *components.LocalModelCacheSpec) bool {
+	return cache != nil && strings.EqualFold(strings.TrimSpace(cache.Enabled), components.LocalModelCacheEnabled)
+}
+
+func validateLocalModelCache(params components.VllmCustomSpec) error {
+	cache := params.LocalModelCache
+	if cache == nil {
+		return nil
+	}
+	const field = "llmEngine.parameters.localModelCache"
+	switch strings.ToLower(strings.TrimSpace(cache.Enabled)) {
+	case "", components.LocalModelCacheDisabled:
+		return nil
+	case components.LocalModelCacheEnabled:
+	default:
+		return fmt.Errorf("%s.enabled must be %q or %q", field, components.LocalModelCacheDisabled, components.LocalModelCacheEnabled)
+	}
+	if !common.LocalModelEnabled() {
+		return fmt.Errorf("%s.enabled requires kserveResources.kserve.localmodel.enabled in the provider chart", field)
+	}
+	if ptr.Deref(params.DisableStorageInitializer, false) {
+		return fmt.Errorf("%s requires disableStorageInitializer must remain false", field)
+	}
+	if strings.TrimSpace(cache.ModelSize) == "" {
+		return fmt.Errorf("%s.modelSize is required", field)
+	}
+	size, err := resource.ParseQuantity(strings.TrimSpace(cache.ModelSize))
+	if err != nil {
+		return fmt.Errorf("%s.modelSize %q is invalid: %w", field, cache.ModelSize, err)
+	}
+	if size.Sign() <= 0 {
+		return fmt.Errorf("%s.modelSize must be greater than zero", field)
+	}
+	nodeGroup := strings.TrimSpace(cache.NodeGroup)
+	if nodeGroup == "" {
+		return fmt.Errorf("%s.nodeGroup is required", field)
+	}
+	if problems := validation.IsDNS1123Subdomain(nodeGroup); len(problems) > 0 {
+		return fmt.Errorf("%s.nodeGroup %q is invalid: %s", field, cache.NodeGroup, strings.Join(problems, "; "))
+	}
+	serviceAccount := strings.TrimSpace(cache.ServiceAccountName)
+	if serviceAccount != "" {
+		if problems := validation.IsDNS1123Subdomain(serviceAccount); len(problems) > 0 {
+			return fmt.Errorf("%s.serviceAccountName %q is invalid: %s", field, cache.ServiceAccountName, strings.Join(problems, "; "))
+		}
+	}
+	return nil
+}
+
+func localModelJobNamespace() string {
+	if namespace := strings.TrimSpace(os.Getenv(localModelJobNamespaceEnv)); namespace != "" {
+		return namespace
+	}
+	return defaultLocalModelJobNamespace
+}
+
+func authorizeLocalModelCacheServiceAccount(c *controller.Context, params components.VllmCustomSpec) error {
+	cache := params.LocalModelCache
+	if !localModelCacheEnabled(cache) {
+		return nil
+	}
+	serviceAccountName := strings.TrimSpace(cache.ServiceAccountName)
+	if serviceAccountName == "" {
+		return nil
+	}
+
+	const field = "llmEngine.parameters.localModelCache.serviceAccountName"
+	jobNamespace := localModelJobNamespace()
+	serviceAccount := &corev1.ServiceAccount{}
+	key := types.NamespacedName{Name: serviceAccountName, Namespace: jobNamespace}
+	if err := c.Client().Get(c.Context(), key, serviceAccount); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("%s %q was not found in shared job namespace %q", field, serviceAccountName, jobNamespace)
+		}
+		return fmt.Errorf("getting %s %q from shared job namespace %q: %w", field, serviceAccountName, jobNamespace, err)
+	}
+
+	instanceNamespace := serviceAccount.Annotations[localModelInstanceNamespaceAnnotation]
+	if strings.TrimSpace(instanceNamespace) == "" {
+		return fmt.Errorf("%s %q is missing required annotation %q", field, serviceAccountName, localModelInstanceNamespaceAnnotation)
+	}
+	if instanceNamespace != c.Namespace() {
+		return fmt.Errorf(
+			"%s %q annotation %q binds it to namespace %q, not Instance namespace %q",
+			field, serviceAccountName, localModelInstanceNamespaceAnnotation, instanceNamespace, c.Namespace(),
+		)
+	}
+	return nil
 }
 
 // workloadScaling is the min/max/actuator triple shared by decode and prefill.
@@ -919,8 +1037,151 @@ func applyStorageInitializerResources(spec *kservev1alpha2.LLMInferenceServiceSp
 	}
 }
 
+func buildLocalModelNamespaceCache(c *controller.Context, params components.VllmCustomSpec) *unstructured.Unstructured {
+	cache := unstructuredObject(localModelNamespaceCacheGVK)
+	cache.SetName(c.Name())
+	cache.SetNamespace(c.Namespace())
+	spec := map[string]any{
+		"sourceModelUri": params.ModelURI,
+		"modelSize":      strings.TrimSpace(params.LocalModelCache.ModelSize),
+		"nodeGroups":     []any{strings.TrimSpace(params.LocalModelCache.NodeGroup)},
+	}
+	if serviceAccount := strings.TrimSpace(params.LocalModelCache.ServiceAccountName); serviceAccount != "" {
+		spec["serviceAccountName"] = serviceAccount
+	}
+	cache.Object["spec"] = spec
+	return cache
+}
+
+func requireLocalModelNamespaceCacheOwner(c *controller.Context, cache *unstructured.Unstructured) error {
+	owner := metav1.GetControllerOf(cache)
+	if owner == nil {
+		return fmt.Errorf(
+			"LocalModelNamespaceCache %q is not controller-owned by Instance %q (UID %q)",
+			cache.GetName(), c.Name(), c.Instance().UID,
+		)
+	}
+	if owner.UID != c.Instance().UID {
+		return fmt.Errorf(
+			"LocalModelNamespaceCache %q is controller-owned by %s %q (UID %q), not Instance %q (UID %q)",
+			cache.GetName(), owner.Kind, owner.Name, owner.UID, c.Name(), c.Instance().UID,
+		)
+	}
+	return nil
+}
+
+func deleteOwnedLocalModelNamespaceCache(c *controller.Context, cache *unstructured.Unstructured) error {
+	if err := requireLocalModelNamespaceCacheOwner(c, cache); err != nil {
+		return err
+	}
+	if err := c.Delete(cache); err != nil && !apimeta.IsNoMatchError(err) {
+		return fmt.Errorf("deleting LocalModelNamespaceCache %q: %w", c.Name(), err)
+	}
+	return nil
+}
+
+func cleanupLocalModelNamespaceCache(c *controller.Context) error {
+	cache := unstructuredObject(localModelNamespaceCacheGVK)
+	key := types.NamespacedName{Name: c.Name(), Namespace: c.Namespace()}
+	err := c.Client().Get(c.Context(), key, cache)
+	if apierrors.IsNotFound(err) || apimeta.IsNoMatchError(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("getting LocalModelNamespaceCache %q: %w", c.Name(), err)
+	}
+	return deleteOwnedLocalModelNamespaceCache(c, cache)
+}
+
+func deleteLLMForCacheTransition(c *controller.Context) (bool, error) {
+	llmisvc := &kservev1alpha2.LLMInferenceService{}
+	key := types.NamespacedName{Name: c.Name(), Namespace: c.Namespace()}
+	err := c.Client().Get(c.Context(), key, llmisvc)
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("getting LLMInferenceService %q for cache transition: %w", c.Name(), err)
+	}
+	if err := c.Delete(llmisvc); err != nil {
+		return false, fmt.Errorf("deleting LLMInferenceService %q for cache transition: %w", c.Name(), err)
+	}
+	return true, nil
+}
+
+// syncLocalModelCache reconciles an Instance-owned namespace cache before the
+// workload is admitted. It returns false while deleting the workload before a
+// stale cache because KServe protects caches that are still in use.
+func syncLocalModelCache(c *controller.Context, params components.VllmCustomSpec) (bool, error) {
+	enabled := localModelCacheEnabled(params.LocalModelCache)
+	if !common.LocalModelEnabled() && enabled {
+		return false, fmt.Errorf("local model cache requires kserveResources.kserve.localmodel.enabled in the provider chart")
+	}
+	if err := authorizeLocalModelCacheServiceAccount(c, params); err != nil {
+		return false, err
+	}
+
+	cache := unstructuredObject(localModelNamespaceCacheGVK)
+	key := types.NamespacedName{Name: c.Name(), Namespace: c.Namespace()}
+	err := c.Client().Get(c.Context(), key, cache)
+	if apimeta.IsNoMatchError(err) && !enabled {
+		return true, nil
+	}
+	if apierrors.IsNotFound(err) {
+		if !enabled {
+			return true, nil
+		}
+		desired := buildLocalModelNamespaceCache(c, params)
+		if err := common.Apply(c.Context(), c.Client(), c.Instance(), desired); err != nil {
+			return false, fmt.Errorf("applying LocalModelNamespaceCache %q: %w", c.Name(), err)
+		}
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("getting LocalModelNamespaceCache %q: %w", c.Name(), err)
+	}
+	if err := requireLocalModelNamespaceCacheOwner(c, cache); err != nil {
+		return false, err
+	}
+
+	sourceURI, found, err := unstructured.NestedString(cache.Object, "spec", "sourceModelUri")
+	if err != nil {
+		return false, fmt.Errorf("reading LocalModelNamespaceCache %q sourceModelUri: %w", c.Name(), err)
+	}
+	if !enabled || !found || sourceURI != params.ModelURI {
+		workloadDeleted, err := deleteLLMForCacheTransition(c)
+		if err != nil {
+			return false, err
+		}
+		if workloadDeleted {
+			return false, nil
+		}
+		if err := deleteOwnedLocalModelNamespaceCache(c, cache); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
+	desired := buildLocalModelNamespaceCache(c, params)
+	if err := common.Apply(c.Context(), c.Client(), c.Instance(), desired); err != nil {
+		return false, fmt.Errorf("applying LocalModelNamespaceCache %q: %w", c.Name(), err)
+	}
+	return true, nil
+}
+
 // syncLLM creates or updates the LLMInferenceService.
 func (p *Provider) syncLLM(c *controller.Context) error {
+	comp := c.Instance().Spec.Components[common.ComponentLlmEngine]
+	var params components.VllmCustomSpec
+	c.TryDecodeComponentParameters(comp, &params)
+	cacheReady, err := syncLocalModelCache(c, params)
+	if err != nil {
+		return err
+	}
+	if !cacheReady {
+		return nil
+	}
+
 	// Provision the HuggingFace token ServiceAccount before the workload so
 	// KServe finds it when it reconciles the storage-initializer.
 	if common.HFTokenSecretName() != "" {
@@ -1057,10 +1318,15 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 		return controller.Provisioning("Waiting for LLMInferenceService"), nil
 	}
 
+	cacheMessage, err := localModelCacheStatusMessage(c, llmisvc)
+	if err != nil {
+		return controller.Status{}, err
+	}
+
 	ready := llmisvc.Status.GetCondition(apis.ConditionReady)
 	if ready != nil && ready.IsTrue() {
 		if waiting := unservedWorkload(llmisvc.Status.Workloads); waiting != "" {
-			return controller.Provisioning(waiting), nil
+			return withStatusMessage(controller.Provisioning(waiting), cacheMessage), nil
 		}
 
 		var topo llm.LlmTopologyParameters
@@ -1077,24 +1343,88 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 				return controller.Status{}, err
 			}
 			if waiting != "" {
-				return controller.Provisioning(waiting), nil
+				return withStatusMessage(controller.Provisioning(waiting), cacheMessage), nil
 			}
-			return controller.ReadyWithConnectionDetails(details), nil
+			return withStatusMessage(controller.ReadyWithConnectionDetails(details), cacheMessage), nil
 		}
 
 		// Otherwise surface connection details from the external Service or
 		// direct KServe workload URL.
 		details, err := p.llmConnectionDetails(c, llmisvc)
 		if err != nil {
-			return controller.Provisioning(err.Error()), nil
+			return withStatusMessage(controller.Provisioning(err.Error()), cacheMessage), nil
 		}
 		if details != nil {
-			return controller.ReadyWithConnectionDetails(*details), nil
+			return withStatusMessage(controller.ReadyWithConnectionDetails(*details), cacheMessage), nil
 		}
-		return controller.Ready(), nil
+		return withStatusMessage(controller.Ready(), cacheMessage), nil
 	}
 
-	return controller.Provisioning(conditionMessage(ready, "LLMInferenceService is being created")), nil
+	status := controller.Provisioning(conditionMessage(ready, "LLMInferenceService is being created"))
+	return withStatusMessage(status, cacheMessage), nil
+}
+
+func localModelCacheStatusMessage(c *controller.Context, llmisvc *kservev1alpha2.LLMInferenceService) (string, error) {
+	name := llmisvc.Labels[constants.LocalModelLabel]
+	if name == "" {
+		return "", nil
+	}
+
+	gvk := localModelCacheGVK
+	namespace := ""
+	if cacheNamespace := llmisvc.Labels[constants.LocalModelNamespaceLabel]; cacheNamespace != "" {
+		gvk = localModelNamespaceCacheGVK
+		namespace = cacheNamespace
+	}
+
+	cache := unstructuredObject(gvk)
+	err := c.Client().Get(c.Context(), types.NamespacedName{Name: name, Namespace: namespace}, cache)
+	if apierrors.IsNotFound(err) {
+		return fmt.Sprintf("Model cache %q not found", name), nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("getting %s %q: %w", gvk.Kind, name, err)
+	}
+
+	copies, found, err := unstructured.NestedMap(cache.Object, "status", "copies")
+	if err != nil {
+		return "", fmt.Errorf("reading %s %q status: %w", gvk.Kind, name, err)
+	}
+	if !found {
+		return fmt.Sprintf("Model cache %q is preparing", name), nil
+	}
+
+	available, _, err := unstructured.NestedInt64(copies, "available")
+	if err != nil {
+		return "", fmt.Errorf("reading %s %q available copies: %w", gvk.Kind, name, err)
+	}
+	total, _, err := unstructured.NestedInt64(copies, "total")
+	if err != nil {
+		return "", fmt.Errorf("reading %s %q total copies: %w", gvk.Kind, name, err)
+	}
+	failed, _, err := unstructured.NestedInt64(copies, "failed")
+	if err != nil {
+		return "", fmt.Errorf("reading %s %q failed copies: %w", gvk.Kind, name, err)
+	}
+	if total == 0 {
+		return fmt.Sprintf("Model cache %q is preparing", name), nil
+	}
+	if failed > 0 {
+		return fmt.Sprintf("Model cache %q: %d/%d nodes ready, %d failed", name, available, total, failed), nil
+	}
+	return fmt.Sprintf("Model cache %q: %d/%d nodes ready", name, available, total), nil
+}
+
+func withStatusMessage(status controller.Status, message string) controller.Status {
+	if message == "" {
+		return status
+	}
+	if status.Message == "" {
+		status.Message = message
+	} else {
+		status.Message += "; " + message
+	}
+	return status
 }
 
 // unservedWorkload names the first model workload without a ready pod. KServe

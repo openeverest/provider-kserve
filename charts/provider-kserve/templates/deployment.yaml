@@ -85,6 +85,10 @@ spec:
               value: {{ .Values.aiGateway.auth.allowInsecureHTTP | quote }}
             - name: ENABLE_POD_MONITOR
               value: {{ .Values.metrics.podMonitor.enabled | quote }}
+            - name: LOCAL_MODEL_ENABLED
+              value: {{ .Values.kserveResources.kserve.localmodel.enabled | quote }}
+            - name: LOCAL_MODEL_JOB_NAMESPACE
+              value: {{ .Values.kserveResources.kserve.localmodel.jobNamespace | quote }}
             - name: POD_MONITOR_INTERVAL
               value: {{ .Values.metrics.podMonitor.interval | quote }}
             - name: LORA_ADAPTER_CATALOG
