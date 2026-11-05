@@ -1,8 +1,9 @@
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
-  name: test-predictor-identity-reserved
+  name: test-admission
 status:
   (conditions[?type == 'Ready']):
     - status: "False"
       reason: ValidationFailed
+      (contains(message, 'spec.components[predictor].replicas')): true

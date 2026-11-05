@@ -99,3 +99,37 @@ Names for the optional shared Envoy AI Gateway resources.
 {{- define "provider-kserve.aiGatewayListenerName" -}}
 {{- if .Values.aiGateway.tls.enabled }}https{{ else }}{{ .Values.aiGateway.scheme }}{{ end }}
 {{- end }}
+
+{{/*
+Name of the Secret holding the admission webhook's serving certificate
+*/}}
+{{- define "provider-kserve.admissionSecretName" -}}
+{{- printf "%s-admission-cert" (include "provider-kserve.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+The admission webhook's serving certificate: from values, else the Secret the
+previous release created, else a new CA and certificate.
+*/}}
+{{- define "provider-kserve.admissionCerts" -}}
+{{- $certs := .Values.admission.certs }}
+{{- $current := lookup "v1" "Secret" .Release.Namespace (include "provider-kserve.admissionSecretName" .) }}
+{{- if and (index $certs "tls.crt") (index $certs "tls.key") (index $certs "ca.crt") }}
+tls.crt: {{ index $certs "tls.crt" | b64enc }}
+tls.key: {{ index $certs "tls.key" | b64enc }}
+ca.crt: {{ index $certs "ca.crt" | b64enc }}
+{{- else if and $current (index $current.data "ca.crt") }}
+tls.crt: {{ index $current.data "tls.crt" }}
+tls.key: {{ index $current.data "tls.key" }}
+ca.crt: {{ index $current.data "ca.crt" }}
+{{- else }}
+{{- $service := include "provider-kserve.fullname" . }}
+{{- $dnsName := printf "%s.%s.svc" $service .Release.Namespace }}
+{{- $altNames := list $service (printf "%s.%s" $service .Release.Namespace) $dnsName (printf "%s.cluster.local" $dnsName) }}
+{{- $ca := genCA (printf "%s-admission-ca" $service) 3650 }}
+{{- $cert := genSignedCert $dnsName nil $altNames 3650 $ca }}
+tls.crt: {{ $cert.Cert | b64enc }}
+tls.key: {{ $cert.Key | b64enc }}
+ca.crt: {{ $ca.Cert | b64enc }}
+{{- end }}
+{{- end }}

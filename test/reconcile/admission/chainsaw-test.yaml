@@ -1,0 +1,63 @@
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: admission
+spec:
+  description: |
+    The provider's admission webhook rejects an invalid Instance with the
+    field path, and admits it while the provider is down; the Instance
+    reports the error once the provider is back.
+  # Scales the provider down, which every other test depends on.
+  concurrent: false
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get instance -o yaml
+    - podLogs:
+        namespace: default
+        selector: app.kubernetes.io/name=provider-kserve,!app.kubernetes.io/component
+        tail: 100
+  steps:
+    - name: provider-ready
+      try:
+        - assert:
+            file: 00-assert.yaml
+
+    - name: reject-invalid
+      try:
+        - script:
+            content: kubectl apply --dry-run=server -n $NAMESPACE -f 10-invalid-instance.yaml
+            check:
+              ($error != null): true
+              (contains($stderr, 'spec.components[predictor].replicas')): true
+        - script:
+            content: kubectl apply -n $NAMESPACE -f 10-invalid-instance.yaml
+            check:
+              ($error != null): true
+              (contains($stderr, 'spec.components[predictor].replicas')): true
+        - error:
+            file: 10-error.yaml
+
+    - name: admit-while-provider-down
+      try:
+        - script:
+            timeout: 1m
+            content: |
+              kubectl -n default scale deployment/provider-kserve --replicas=0
+              while kubectl -n default get pods -o name \
+                -l 'app.kubernetes.io/name=provider-kserve,!app.kubernetes.io/component' | grep -q .; do
+                sleep 1
+              done
+        - apply:
+            file: 10-invalid-instance.yaml
+      finally:
+        - script:
+            timeout: 2m
+            content: |
+              kubectl -n default scale deployment/provider-kserve --replicas=1
+              kubectl -n default rollout status deployment/provider-kserve --timeout=110s
+
+    - name: report-once-back
+      try:
+        - assert:
+            file: 20-assert.yaml

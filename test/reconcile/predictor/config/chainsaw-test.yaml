@@ -77,20 +77,18 @@ spec:
                     modelFormat:
                       name: sklearn
 
-    - name: reject-malformed-and-unknown-fields
+    - name: reject-malformed-config
+      try:
+        - script:
+            content: kubectl apply -n $NAMESPACE -f 10-malformed.yaml
+            check:
+              ($error != null): true
+              (contains($stderr, 'spec.components[predictor].parameters.config')): true
+
+    - name: report-unknown-fields
       try:
         - apply:
-            file: 10-invalid.yaml
-        - assert:
-            resource:
-              apiVersion: core.openeverest.io/v1alpha1
-              kind: Instance
-              metadata:
-                name: test-predictor-config-malformed
-              status:
-                (conditions[?type == 'Ready']):
-                  - status: "False"
-                    reason: ValidationFailed
+            file: 11-unknown-field.yaml
         - assert:
             resource:
               apiVersion: core.openeverest.io/v1alpha1
@@ -101,12 +99,6 @@ spec:
                 (conditions[?type == 'Ready']):
                   - status: "False"
                     reason: InvalidReference
-        - error:
-            resource:
-              apiVersion: serving.kserve.io/v1beta1
-              kind: InferenceService
-              metadata:
-                name: test-predictor-config-malformed
         - error:
             resource:
               apiVersion: serving.kserve.io/v1beta1

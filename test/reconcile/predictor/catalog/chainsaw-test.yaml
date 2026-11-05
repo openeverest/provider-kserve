@@ -7,8 +7,8 @@ spec:
     parameters.model picks an entry from the chart's predictorModels catalog,
     which fills in the model format and storage URI. A GPU entry also requests
     a GPU and has vLLM pool embeddings, tolerates the GPU node taint and rolls
-    out without a surge pod. A name that is not in the catalog fails
-    validation.
+    out without a surge pod. A name that is not in the catalog is rejected at
+    admission.
   catch:
     - script:
         content: kubectl -n $NAMESPACE get instance,inferenceservice -o yaml
@@ -22,10 +22,11 @@ spec:
 
     - name: unknown-model
       try:
-        - apply:
-            file: 10-instance-unknown.yaml
-        - assert:
-            file: 10-assert-failed.yaml
+        - script:
+            content: kubectl apply -n $NAMESPACE -f 10-instance-unknown.yaml
+            check:
+              ($error != null): true
+              (contains($stderr, 'spec.components[predictor].parameters.model')): true
 
     - name: gpu-catalog-model
       try:
