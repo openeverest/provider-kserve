@@ -16,126 +16,298 @@ spec:
     llmEngine:
       parametersSchema:
         openAPIV3Schema:
+          description: |-
+            VllmCustomSpec defines custom configuration for the vllm component type,
+            which is rendered into a KServe LLMInferenceService (serving.kserve.io/v1alpha2).
           properties:
             baseRefs:
+              description: |-
+                BaseRefs is an ordered list of LLMInferenceServiceConfig names whose specs
+                are inherited and merged (later entries win, this Instance wins over all).
+                This is the primary escape hatch for full runtime customization.
               items:
                 type: string
               type: array
             computeProfile:
+              description: |-
+                ComputeProfile selects the compute profile for the workload. "cpu"
+                composes the CPU-only LLMInferenceServiceConfig (via baseRefs) so the
+                model runs without a GPU; any other value (default "gpu") uses the bundled
+                CUDA presets. This is a convenience over setting baseRefs directly.
               type: string
             config:
+              description: |-
+                Config is an inline LLMInferenceServiceConfig spec body (YAML) authored in
+                the UI's Advanced section. The provider materializes it as an
+                Instance-owned LLMInferenceServiceConfig and attaches it to the generated
+                LLMInferenceService via baseRefs (last, so it overrides presets and any
+                BaseRefs above, while the Instance's own structured fields still win). Use
+                it for runtime settings not exposed as first-class fields (extra vLLM
+                args, env, scheduling). Only the config spec body is provided here; the
+                provider supplies metadata.
               type: string
             dataParallelSize:
+              description: |-
+                DataParallelSize configures vLLM data parallelism (maps to the runtime
+                ParallelismSpec.Data). Use to run multiple model replicas that share the
+                same expert layers, the common layout for Mixture-of-Experts models.
               format: int32
               type: integer
             disableStorageInitializer:
+              description: |-
+                DisableStorageInitializer skips the step that makes the model available
+                to vLLM: KServe then attaches nothing, so the model must already be at
+                /mnt/models (e.g. a LocalModelCache or a volume from the inline config).
+                Must remain false for oci:// and oci+native:// models, and when LoRA
+                adapters use hf:// or s3:// URIs.
               type: boolean
             engine:
+              description: |-
+                Engine holds first-class vLLM engine settings (context length, memory,
+                precision, tool calling, reasoning). The provider appends them after the
+                args the workload inherits from the compute profile, baseRefs and the
+                inline config, so they win over the same flags set there.
               properties:
                 dtype:
+                  description: |-
+                    Dtype is the weight and activation precision (--dtype): auto, half,
+                    float16, bfloat16, float or float32.
                   type: string
                 gpuMemoryUtilization:
-                  format: double
+                  description: |-
+                    GpuMemoryUtilization is the fraction of GPU memory, in (0, 1], vLLM may
+                    claim for weights and KV cache (--gpu-memory-utilization). On the CPU
+                    profile vLLM applies it to host memory.
                   type: number
                 kvCacheDtype:
+                  description: |-
+                    KVCacheDtype is the KV cache precision (--kv-cache-dtype), e.g. fp8 to fit
+                    roughly twice the tokens.
                   type: string
                 maxModelLen:
+                  description: |-
+                    MaxModelLen caps the context length in tokens (--max-model-len). Lowering
+                    it shrinks the KV cache, the usual fix when a model does not fit in GPU
+                    memory.
                   format: int32
                   type: integer
                 maxNumSeqs:
+                  description: MaxNumSeqs caps the sequences batched per iteration (--max-num-seqs).
                   format: int32
                   type: integer
                 quantization:
+                  description: |-
+                    Quantization names the weight quantization method (--quantization), e.g.
+                    fp8, awq_marlin or bitsandbytes. vLLM detects pre-quantized checkpoints on
+                    its own; set it to quantize on the fly or to force a kernel.
                   type: string
                 reasoningParser:
+                  description: |-
+                    ReasoningParser returns the model's thinking in the response's
+                    reasoning_content field instead of the answer (--reasoning-parser), e.g.
+                    qwen3, deepseek_r1 or openai_gptoss.
                   type: string
                 toolCallParser:
+                  description: |-
+                    ToolCallParser turns on OpenAI-style tool calling with the parser matching
+                    the model's chat template (--enable-auto-tool-choice --tool-call-parser),
+                    e.g. hermes for Qwen, llama3_json for Llama 3.x, mistral, openai for
+                    gpt-oss.
                   type: string
               type: object
             expertParallel:
+              description: |-
+                ExpertParallel toggles expert parallelism (maps to ParallelismSpec.Expert)
+                for Mixture-of-Experts models (e.g. Mixtral, DeepSeek, Qwen-MoE):
+                "disabled" (default) or "enabled". Typically combined with dataParallelSize.
               type: string
             gpuCount:
+              description: |-
+                GpuCount is the number of GPUs (nvidia.com/gpu) each vLLM pod requests
+                (head and every worker). The GPU presets carry no GPU limit, so the provider
+                injects this into the model container's resource limits; without it the pod
+                schedules onto any node and vLLM fails to find a device. Defaults to 1 on
+                the GPU profile. Leave unset for the CPU profile. Must be >= tensorParallelSize.
               format: int32
               type: integer
             imagePullSecret:
+              description: |-
+                ImagePullSecret names a Secret in the Instance namespace used to pull
+                images from a private registry, typically an oci:// model image. It is
+                set on every vLLM pod: head, workers and prefill.
               type: string
             kvCacheSpaceGi:
+              description: |-
+                KVCacheSpaceGi overrides VLLM_CPU_KVCACHE_SPACE (GiB) for the CPU profile.
+                Left unset, vLLM auto-sizes the KV cache from the memory that is free at
+                startup (recommended), which adapts to the node. Set it only to cap the KV
+                cache to a specific size; vLLM refuses to start if it exceeds host-free
+                memory at that moment. Ignored for the GPU profile.
               format: int32
               type: integer
             lora:
+              description: |-
+                LoRA attaches one or more LoRA adapters to the base model. Rendered to
+                LLMInferenceService.spec.model.lora; KServe handles download and vLLM flags.
+                Adapters may also be selected via loraDeployment + loraSlot1..3 (UI catalog).
               properties:
                 adapters:
+                  description: |-
+                    Adapters is the list of LoRA modules to load. KServe downloads hf:// and
+                    s3:// adapters via the storage-initializer and mounts pvc:// adapters directly.
                   items:
+                    description: |-
+                      LoRAAdapterSpec identifies one LoRA fine-tune served alongside the base model.
+                      Each adapter is addressable by name in OpenAI "model" requests once KServe
+                      configures vLLM (--lora-modules).
                     properties:
                       name:
+                        description: Name is the model name clients use in requests (e.g. "my-ft-v2").
                         type: string
                       uri:
+                        description: URI is the adapter artifact location (hf://, s3://, or pvc://).
                         type: string
+                    required:
+                      - name
+                      - uri
                     type: object
                   type: array
                 maxAdapters:
+                  description: MaxAdapters maps to vLLM --max-loras (defaults to adapter count when unset).
                   format: int32
                   type: integer
                 maxCpuAdapters:
+                  description: MaxCpuAdapters maps to vLLM --max-cpu-loras (defaults to adapter count when unset).
                   format: int32
                   type: integer
                 maxRank:
+                  description: MaxRank maps to vLLM --max-lora-rank (default 16 when unset).
                   format: int32
                   type: integer
               type: object
             loraDeployment:
+              description: |-
+                LoraDeployment toggles LoRA serving in the UI wizard: "disabled" (default) or
+                "enabled". When enabled, loraSlot1..3 name keys resolve against the chart
+                loraAdapters catalog (LORA_ADAPTER_CATALOG env on the provider).
               type: string
             loraSlot1:
+              description: LoraSlot1..3 hold catalog adapter names chosen in the UI (empty = unused).
               type: string
             loraSlot2:
               type: string
             loraSlot3:
               type: string
             maxReplicas:
+              description: |-
+                MaxReplicas is the WVA autoscaling ceiling for the decode workload.
+                Required when autoscaling is enabled.
               format: int32
               type: integer
             minReplicas:
+              description: |-
+                MinReplicas is the WVA autoscaling floor for the decode workload.
+                Setting MinReplicas or MaxReplicas enables KServe WorkloadSpec.Scaling,
+                and llmEngine.replicas is then ignored. KServe requires ≥ 1; WVA does
+                not scale to zero.
               format: int32
               type: integer
             modelName:
+              description: |-
+                ModelName is the name advertised in the "model" field of inference requests.
+                Defaults to the Instance name when empty.
               type: string
             modelURI:
+              description: |-
+                ModelURI is the location of the model artifacts, e.g.
+                "hf://meta-llama/Llama-3.1-8B-Instruct", "s3://bucket/model",
+                "pvc://claim/path", "oci://registry/repo:tag" (a modelcar image) or
+                "oci+native://registry/repo:tag" (mounted as a Kubernetes image volume).
               type: string
             pipelineParallelSize:
+              description: |-
+                PipelineParallelSize configures vLLM pipeline parallelism across nodes
+                (maps to the runtime --pipeline-parallel-size).
               format: int32
               type: integer
             scalingActuator:
+              description: |-
+                ScalingActuator selects the WVA actuator backend: "keda" (default) or "hpa".
+                KEDA queries Prometheus directly; HPA needs a Prometheus Adapter.
               type: string
             tensorParallelSize:
+              description: |-
+                TensorParallelSize configures vLLM tensor parallelism (maps to the runtime
+                --tensor-parallel-size). Use for models that span multiple GPUs on a node.
               format: int32
               type: integer
             workerCount:
+              description: |-
+                WorkerCount is the number of extra worker pods besides the head for a
+                pipeline-parallel multi-node model. Presence turns on
+                LLMInferenceService.spec.worker. Must equal pipelineParallelSize - 1.
+                PipelineParallelSize alone does not create workers.
               format: int32
               type: integer
             workerResources:
+              description: |-
+                WorkerResources are optional CPU/memory/GPU requests for worker pods.
+                Unset copies llmEngine.resources. Setting this without WorkerCount is an error.
               properties:
                 claims:
+                  description: |-
+                    Claims lists the names of resources, defined in spec.resourceClaims,
+                    that are used by this container.
+
+                    This field depends on the
+                    DynamicResourceAllocation feature gate.
+
+                    This field is immutable. It can only be set for containers.
                   items:
+                    description: ResourceClaim references one entry in PodSpec.ResourceClaims.
                     properties:
                       name:
+                        description: |-
+                          Name must match the name of one entry in pod.spec.resourceClaims of
+                          the Pod where this field is used. It makes that resource available
+                          inside a container.
                         type: string
                       request:
+                        description: |-
+                          Request is the name chosen for a request in the referenced claim.
+                          If empty, everything from the claim is made available, otherwise
+                          only the result of this request.
                         type: string
+                    required:
+                      - name
                     type: object
                   type: array
+                  x-kubernetes-list-map-keys:
+                    - name
+                  x-kubernetes-list-type: map
                 limits:
                   additionalProperties:
-                    properties:
-                      format:
-                        type: string
-                    type: object
+                    anyOf:
+                      - type: integer
+                      - type: string
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  description: |-
+                    Limits describes the maximum amount of compute resources allowed.
+                    More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                   type: object
                 requests:
                   additionalProperties:
-                    properties:
-                      format:
-                        type: string
-                    type: object
+                    anyOf:
+                      - type: integer
+                      - type: string
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  description: |-
+                    Requests describes the minimum amount of compute resources required.
+                    If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                    otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                    More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                   type: object
               type: object
           type: object
@@ -143,268 +315,717 @@ spec:
     predictor:
       parametersSchema:
         openAPIV3Schema:
+          description: |-
+            ModelServerCustomSpec defines custom configuration for the modelServer
+            component type, which is rendered into a KServe InferenceService predictor
+            (serving.kserve.io/v1beta1).
           properties:
             annotations:
               additionalProperties:
                 type: string
+              description: |-
+                Annotations are added to the InferenceService; KServe copies them to
+                the predictor pods. serving.kserve.io/deploymentMode is rejected.
               type: object
             apiSchema:
+              description: |-
+                APISchema is the API the image serves, which makes it eligible for the
+                Envoy AI Gateway: OpenAI (under /v1) or TypeSafe (the System One
+                decision API, POST /v1/systemone, served e.g. by OpenJev). Requires
+                image.
               type: string
             args:
+              description: |-
+                Args is appended to the serving runtime's arguments (e.g.
+                --task=text_embedding for the huggingface runtime). For huggingface
+                without a GPU the provider adds --backend=huggingface unless set here.
               items:
                 type: string
               type: array
             backendAPIKeySecret:
+              description: |-
+                BackendAPIKeySecret names a Secret in the Instance namespace whose
+                apiKey entry the Envoy AI Gateway sends to the image as a bearer token,
+                for images that require their own API key. Requires image and
+                externalAccess EnvoyAIGateway.
               type: string
             command:
+              description: Command overrides the image entrypoint. Requires image.
               items:
                 type: string
               type: array
             config:
+              description: |-
+                Config is an inline InferenceService spec body (YAML). Nested maps are
+                merged with the generated spec; structured fields win and lists are
+                replaced, not appended. The merged resource is validated by the API server.
               type: string
             containerSecurityContext:
+              description: |-
+                ContainerSecurityContext is the model server container's security
+                context.
               properties:
                 allowPrivilegeEscalation:
+                  description: |-
+                    AllowPrivilegeEscalation controls whether a process can gain more
+                    privileges than its parent process. This bool directly controls if
+                    the no_new_privs flag will be set on the container process.
+                    AllowPrivilegeEscalation is true always when the container is:
+                    1) run as Privileged
+                    2) has CAP_SYS_ADMIN
+                    Note that this field cannot be set when spec.os.name is windows.
                   type: boolean
                 appArmorProfile:
+                  description: |-
+                    appArmorProfile is the AppArmor options to use by this container. If set, this profile
+                    overrides the pod's appArmorProfile.
+                    Note that this field cannot be set when spec.os.name is windows.
                   properties:
                     localhostProfile:
+                      description: |-
+                        localhostProfile indicates a profile loaded on the node that should be used.
+                        The profile must be preconfigured on the node to work.
+                        Must match the loaded name of the profile.
+                        Must be set if and only if type is "Localhost".
                       type: string
                     type:
+                      description: |-
+                        type indicates which kind of AppArmor profile will be applied.
+                        Valid options are:
+                          Localhost - a profile pre-loaded on the node.
+                          RuntimeDefault - the container runtime's default profile.
+                          Unconfined - no AppArmor enforcement.
                       type: string
+                  required:
+                    - type
                   type: object
                 capabilities:
+                  description: |-
+                    The capabilities to add/drop when running containers.
+                    Defaults to the default set of capabilities granted by the container runtime.
+                    Note that this field cannot be set when spec.os.name is windows.
                   properties:
                     add:
+                      description: Added capabilities
                       items:
+                        description: Capability represent POSIX capabilities type
                         type: string
                       type: array
+                      x-kubernetes-list-type: atomic
                     drop:
+                      description: Removed capabilities
                       items:
+                        description: Capability represent POSIX capabilities type
                         type: string
                       type: array
+                      x-kubernetes-list-type: atomic
                   type: object
                 privileged:
+                  description: |-
+                    Run container in privileged mode.
+                    Processes in privileged containers are essentially equivalent to root on the host.
+                    Defaults to false.
+                    Note that this field cannot be set when spec.os.name is windows.
                   type: boolean
                 procMount:
+                  description: |-
+                    procMount denotes the type of proc mount to use for the containers.
+                    The default value is Default which uses the container runtime defaults for
+                    readonly paths and masked paths.
+                    Note that this field cannot be set when spec.os.name is windows.
                   type: string
                 readOnlyRootFilesystem:
+                  description: |-
+                    Whether this container has a read-only root filesystem.
+                    Default is false.
+                    Note that this field cannot be set when spec.os.name is windows.
                   type: boolean
                 runAsGroup:
+                  description: |-
+                    The GID to run the entrypoint of the container process.
+                    Uses runtime default if unset.
+                    May also be set in PodSecurityContext.  If set in both SecurityContext and
+                    PodSecurityContext, the value specified in SecurityContext takes precedence.
+                    Note that this field cannot be set when spec.os.name is windows.
                   format: int64
                   type: integer
                 runAsNonRoot:
+                  description: |-
+                    Indicates that the container must run as a non-root user.
+                    If true, the Kubelet will validate the image at runtime to ensure that it
+                    does not run as UID 0 (root) and fail to start the container if it does.
+                    If unset or false, no such validation will be performed.
+                    May also be set in PodSecurityContext.  If set in both SecurityContext and
+                    PodSecurityContext, the value specified in SecurityContext takes precedence.
                   type: boolean
                 runAsUser:
+                  description: |-
+                    The UID to run the entrypoint of the container process.
+                    Defaults to user specified in image metadata if unspecified.
+                    May also be set in PodSecurityContext.  If set in both SecurityContext and
+                    PodSecurityContext, the value specified in SecurityContext takes precedence.
+                    Note that this field cannot be set when spec.os.name is windows.
                   format: int64
                   type: integer
                 seLinuxOptions:
+                  description: |-
+                    The SELinux context to be applied to the container.
+                    If unspecified, the container runtime will allocate a random SELinux context for each
+                    container.  May also be set in PodSecurityContext.  If set in both SecurityContext and
+                    PodSecurityContext, the value specified in SecurityContext takes precedence.
+                    Note that this field cannot be set when spec.os.name is windows.
                   properties:
                     level:
+                      description: Level is SELinux level label that applies to the container.
                       type: string
                     role:
+                      description: Role is a SELinux role label that applies to the container.
                       type: string
                     type:
+                      description: Type is a SELinux type label that applies to the container.
                       type: string
                     user:
+                      description: User is a SELinux user label that applies to the container.
                       type: string
                   type: object
                 seccompProfile:
+                  description: |-
+                    The seccomp options to use by this container. If seccomp options are
+                    provided at both the pod & container level, the container options
+                    override the pod options.
+                    Note that this field cannot be set when spec.os.name is windows.
                   properties:
                     localhostProfile:
+                      description: |-
+                        localhostProfile indicates a profile defined in a file on the node should be used.
+                        The profile must be preconfigured on the node to work.
+                        Must be a descending path, relative to the kubelet's configured seccomp profile location.
+                        Must be set if type is "Localhost". Must NOT be set for any other type.
                       type: string
                     type:
+                      description: |-
+                        type indicates which kind of seccomp profile will be applied.
+                        Valid options are:
+
+                        Localhost - a profile defined in a file on the node should be used.
+                        RuntimeDefault - the container runtime default profile should be used.
+                        Unconfined - no profile should be applied.
                       type: string
+                  required:
+                    - type
                   type: object
                 windowsOptions:
+                  description: |-
+                    The Windows specific settings applied to all containers.
+                    If unspecified, the options from the PodSecurityContext will be used.
+                    If set in both SecurityContext and PodSecurityContext, the value specified in SecurityContext takes precedence.
+                    Note that this field cannot be set when spec.os.name is linux.
                   properties:
                     gmsaCredentialSpec:
+                      description: |-
+                        GMSACredentialSpec is where the GMSA admission webhook
+                        (https://github.com/kubernetes-sigs/windows-gmsa) inlines the contents of the
+                        GMSA credential spec named by the GMSACredentialSpecName field.
                       type: string
                     gmsaCredentialSpecName:
+                      description: GMSACredentialSpecName is the name of the GMSA credential spec to use.
                       type: string
                     hostProcess:
+                      description: |-
+                        HostProcess determines if a container should be run as a 'Host Process' container.
+                        All of a Pod's containers must have the same effective HostProcess value
+                        (it is not allowed to have a mix of HostProcess containers and non-HostProcess containers).
+                        In addition, if HostProcess is true then HostNetwork must also be set to true.
                       type: boolean
                     runAsUserName:
+                      description: |-
+                        The UserName in Windows to run the entrypoint of the container process.
+                        Defaults to the user specified in image metadata if unspecified.
+                        May also be set in PodSecurityContext. If set in both SecurityContext and
+                        PodSecurityContext, the value specified in SecurityContext takes precedence.
                       type: string
                   type: object
               type: object
             env:
+              description: |-
+                Env is added to the model server container (e.g. OMP_NUM_THREADS, or
+                HF_TOKEN from a Secret via valueFrom).
               items:
+                description: EnvVar represents an environment variable present in a Container.
                 properties:
                   name:
+                    description: |-
+                      Name of the environment variable.
+                      May consist of any printable ASCII characters except '='.
                     type: string
                   value:
+                    description: |-
+                      Variable references $(VAR_NAME) are expanded
+                      using the previously defined environment variables in the container and
+                      any service environment variables. If a variable cannot be resolved,
+                      the reference in the input string will be unchanged. Double $$ are reduced
+                      to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+                      "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+                      Escaped references will never be expanded, regardless of whether the variable
+                      exists or not.
+                      Defaults to "".
                     type: string
                   valueFrom:
+                    description: Source for the environment variable's value. Cannot be used if value is not empty.
                     properties:
                       configMapKeyRef:
+                        description: Selects a key of a ConfigMap.
                         properties:
                           key:
+                            description: |-
+                              The key to select from the ConfigMap's Data field.
+                              Keys in the BinaryData field are not currently propagated to container env vars.
                             type: string
-                          localObjectReference:
-                            properties:
-                              name:
-                                type: string
-                            type: object
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
                           optional:
+                            description: Specify whether the ConfigMap or its key must be defined
                             type: boolean
+                        required:
+                          - key
                         type: object
+                        x-kubernetes-map-type: atomic
                       fieldRef:
+                        description: |-
+                          Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+                          spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
                         properties:
                           apiVersion:
+                            description: Version of the schema the FieldPath is written in terms of, defaults to "v1".
                             type: string
                           fieldPath:
+                            description: Path of the field to select in the specified API version.
                             type: string
+                        required:
+                          - fieldPath
                         type: object
+                        x-kubernetes-map-type: atomic
                       fileKeyRef:
+                        description: |-
+                          FileKeyRef selects a key of the env file.
+                          Requires the EnvFiles feature gate to be enabled.
                         properties:
                           key:
+                            description: |-
+                              The key within the env file. An invalid key will prevent the pod from starting.
+                              The keys defined within a source may consist of any printable ASCII characters except '='.
+                              During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
                             type: string
                           optional:
+                            default: false
+                            description: |-
+                              Specify whether the file or its key must be defined. If the file or key
+                              does not exist, then the env var is not published.
+                              If optional is set to true and the specified key does not exist,
+                              the environment variable will not be set in the Pod's containers.
+
+                              If optional is set to false and the specified key does not exist,
+                              an error will be returned during Pod creation.
                             type: boolean
                           path:
+                            description: |-
+                              The path within the volume from which to select the file.
+                              Must be relative and may not contain the '..' path or start with '..'.
                             type: string
                           volumeName:
+                            description: The name of the volume mount containing the env file.
                             type: string
+                        required:
+                          - key
+                          - path
+                          - volumeName
                         type: object
+                        x-kubernetes-map-type: atomic
                       resourceFieldRef:
+                        description: |-
+                          Selects a resource of the container: only resources limits and requests
+                          (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
                         properties:
                           containerName:
+                            description: 'Container name: required for volumes, optional for env vars'
                             type: string
                           divisor:
-                            properties:
-                              format:
-                                type: string
-                            type: object
+                            anyOf:
+                              - type: integer
+                              - type: string
+                            description: Specifies the output format of the exposed resources, defaults to "1"
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
                           resource:
+                            description: 'Required: resource to select'
                             type: string
+                        required:
+                          - resource
                         type: object
+                        x-kubernetes-map-type: atomic
                       secretKeyRef:
+                        description: Selects a key of a secret in the pod's namespace
                         properties:
                           key:
+                            description: The key of the secret to select from.  Must be a valid secret key.
                             type: string
-                          localObjectReference:
-                            properties:
-                              name:
-                                type: string
-                            type: object
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
                           optional:
+                            description: Specify whether the Secret or its key must be defined
                             type: boolean
+                        required:
+                          - key
                         type: object
+                        x-kubernetes-map-type: atomic
                     type: object
+                required:
+                  - name
                 type: object
               type: array
             gpuCount:
+              description: |-
+                GpuCount is the number of GPUs (nvidia.com/gpu) each predictor pod
+                requests. Unset takes the catalog entry's value; 0 runs on CPU.
               format: int32
               type: integer
             healthPath:
+              description: |-
+                HealthPath is an HTTP path on port that returns 200 once the model is
+                loaded (e.g. /health); the pod gets no traffic before that. Requires
+                image.
               type: string
             image:
+              description: |-
+                Image serves the model with this container image instead of a KServe
+                serving runtime; model, modelFormat, runtime, runtimeVersion and task
+                do not apply. Args, env, gpuCount and the component resources apply to
+                this container, and storageURI (optional) is downloaded to /mnt/models.
               type: string
             imagePullSecret:
+              description: |-
+                ImagePullSecret names a Secret for pulling image from a private
+                registry. Requires image.
               type: string
             labels:
               additionalProperties:
                 type: string
+              description: |-
+                Labels are added to the InferenceService; KServe copies them to the
+                predictor pods. Keys the provider manages are rejected.
               type: object
             maxReplicas:
+              description: MaxReplicas is the autoscaling ceiling.
               format: int32
               type: integer
             minReplicas:
+              description: |-
+                MinReplicas is the autoscaling floor, at least 1: KServe Standard mode
+                does not scale to zero.
               format: int32
               type: integer
             model:
+              description: |-
+                Model names an entry of the chart's predictorModels catalog (the UI model
+                picker). It supplies modelFormat, storageURI and task unless modelFormat
+                or storageURI is set, in which case the catalog entry is ignored.
               type: string
             modelFormat:
+              description: |-
+                ModelFormat is the model framework, e.g. "sklearn", "pytorch",
+                "tensorflow", "xgboost", "onnx", "triton", "huggingface". KServe uses it
+                to auto-select a supporting ServingRuntime.
               type: string
             openAICompatible:
+              description: |-
+                OpenAICompatible marks an image that serves the OpenAI API under /v1,
+                which makes it eligible for the Envoy AI Gateway. Shorthand for
+                apiSchema OpenAI. Requires image.
               type: boolean
             port:
+              description: |-
+                Port is the HTTP port the image listens on (default 8080). Requires
+                image.
               format: int32
               type: integer
             runtime:
+              description: |-
+                Runtime explicitly selects a (Cluster)ServingRuntime by name instead of
+                letting KServe auto-select one from the model format.
               type: string
             runtimeVersion:
+              description: |-
+                RuntimeVersion pins the serving runtime version. Optional; KServe defaults
+                based on the selected runtime when empty.
               type: string
             securityContext:
+              description: SecurityContext is the predictor pod's security context.
               properties:
                 appArmorProfile:
+                  description: |-
+                    appArmorProfile is the AppArmor options to use by the containers in this pod.
+                    Note that this field cannot be set when spec.os.name is windows.
                   properties:
                     localhostProfile:
+                      description: |-
+                        localhostProfile indicates a profile loaded on the node that should be used.
+                        The profile must be preconfigured on the node to work.
+                        Must match the loaded name of the profile.
+                        Must be set if and only if type is "Localhost".
                       type: string
                     type:
+                      description: |-
+                        type indicates which kind of AppArmor profile will be applied.
+                        Valid options are:
+                          Localhost - a profile pre-loaded on the node.
+                          RuntimeDefault - the container runtime's default profile.
+                          Unconfined - no AppArmor enforcement.
                       type: string
+                  required:
+                    - type
                   type: object
                 fsGroup:
+                  description: |-
+                    A special supplemental group that applies to all containers in a pod.
+                    Some volume types allow the Kubelet to change the ownership of that volume
+                    to be owned by the pod:
+
+                    1. The owning GID will be the FSGroup
+                    2. The setgid bit is set (new files created in the volume will be owned by FSGroup)
+                    3. The permission bits are OR'd with rw-rw----
+
+                    If unset, the Kubelet will not modify the ownership and permissions of any volume.
+                    Note that this field cannot be set when spec.os.name is windows.
                   format: int64
                   type: integer
                 fsGroupChangePolicy:
+                  description: |-
+                    fsGroupChangePolicy defines behavior of changing ownership and permission of the volume
+                    before being exposed inside Pod. This field will only apply to
+                    volume types which support fsGroup based ownership(and permissions).
+                    It will have no effect on ephemeral volume types such as: secret, configmaps
+                    and emptydir.
+                    Valid values are "OnRootMismatch" and "Always". If not specified, "Always" is used.
+                    Note that this field cannot be set when spec.os.name is windows.
                   type: string
                 runAsGroup:
+                  description: |-
+                    The GID to run the entrypoint of the container process.
+                    Uses runtime default if unset.
+                    May also be set in SecurityContext.  If set in both SecurityContext and
+                    PodSecurityContext, the value specified in SecurityContext takes precedence
+                    for that container.
+                    Note that this field cannot be set when spec.os.name is windows.
                   format: int64
                   type: integer
                 runAsNonRoot:
+                  description: |-
+                    Indicates that the container must run as a non-root user.
+                    If true, the Kubelet will validate the image at runtime to ensure that it
+                    does not run as UID 0 (root) and fail to start the container if it does.
+                    If unset or false, no such validation will be performed.
+                    May also be set in SecurityContext.  If set in both SecurityContext and
+                    PodSecurityContext, the value specified in SecurityContext takes precedence.
                   type: boolean
                 runAsUser:
+                  description: |-
+                    The UID to run the entrypoint of the container process.
+                    Defaults to user specified in image metadata if unspecified.
+                    May also be set in SecurityContext.  If set in both SecurityContext and
+                    PodSecurityContext, the value specified in SecurityContext takes precedence
+                    for that container.
+                    Note that this field cannot be set when spec.os.name is windows.
                   format: int64
                   type: integer
                 seLinuxChangePolicy:
+                  description: |-
+                    seLinuxChangePolicy defines how the container's SELinux label is applied to all volumes used by the Pod.
+                    It has no effect on nodes that do not support SELinux or to volumes does not support SELinux.
+                    Valid values are "MountOption" and "Recursive".
+
+                    "Recursive" means relabeling of all files on all Pod volumes by the container runtime.
+                    This may be slow for large volumes, but allows mixing privileged and unprivileged Pods sharing the same volume on the same node.
+
+                    "MountOption" mounts all eligible Pod volumes with `-o context` mount option.
+                    This requires all Pods that share the same volume to use the same SELinux label.
+                    It is not possible to share the same volume among privileged and unprivileged Pods.
+                    Eligible volumes are in-tree FibreChannel and iSCSI volumes, and all CSI volumes
+                    whose CSI driver announces SELinux support by setting spec.seLinuxMount: true in their
+                    CSIDriver instance. Other volumes are always re-labelled recursively.
+
+                    If not specified, "MountOption" is used.
+
+                    This field affects only Pods that have SELinux label set, either in PodSecurityContext or in SecurityContext of all containers.
+
+                    All Pods that use the same volume should use the same seLinuxChangePolicy, otherwise some pods can get stuck in ContainerCreating state.
+                    Note that this field cannot be set when spec.os.name is windows.
                   type: string
                 seLinuxOptions:
+                  description: |-
+                    The SELinux context to be applied to all containers.
+                    If unspecified, the container runtime will allocate a random SELinux context for each
+                    container.  May also be set in SecurityContext.  If set in
+                    both SecurityContext and PodSecurityContext, the value specified in SecurityContext
+                    takes precedence for that container.
+                    Note that this field cannot be set when spec.os.name is windows.
                   properties:
                     level:
+                      description: Level is SELinux level label that applies to the container.
                       type: string
                     role:
+                      description: Role is a SELinux role label that applies to the container.
                       type: string
                     type:
+                      description: Type is a SELinux type label that applies to the container.
                       type: string
                     user:
+                      description: User is a SELinux user label that applies to the container.
                       type: string
                   type: object
                 seccompProfile:
+                  description: |-
+                    The seccomp options to use by the containers in this pod.
+                    Note that this field cannot be set when spec.os.name is windows.
                   properties:
                     localhostProfile:
+                      description: |-
+                        localhostProfile indicates a profile defined in a file on the node should be used.
+                        The profile must be preconfigured on the node to work.
+                        Must be a descending path, relative to the kubelet's configured seccomp profile location.
+                        Must be set if type is "Localhost". Must NOT be set for any other type.
                       type: string
                     type:
+                      description: |-
+                        type indicates which kind of seccomp profile will be applied.
+                        Valid options are:
+
+                        Localhost - a profile defined in a file on the node should be used.
+                        RuntimeDefault - the container runtime default profile should be used.
+                        Unconfined - no profile should be applied.
                       type: string
+                  required:
+                    - type
                   type: object
                 supplementalGroups:
+                  description: |-
+                    A list of groups applied to the first process run in each container, in
+                    addition to the container's primary GID and fsGroup (if specified).  If
+                    the SupplementalGroupsPolicy feature is enabled, the
+                    supplementalGroupsPolicy field determines whether these are in addition
+                    to or instead of any group memberships defined in the container image.
+                    If unspecified, no additional groups are added, though group memberships
+                    defined in the container image may still be used, depending on the
+                    supplementalGroupsPolicy field.
+                    Note that this field cannot be set when spec.os.name is windows.
                   items:
                     format: int64
                     type: integer
                   type: array
+                  x-kubernetes-list-type: atomic
                 supplementalGroupsPolicy:
+                  description: |-
+                    Defines how supplemental groups of the first container processes are calculated.
+                    Valid values are "Merge" and "Strict". If not specified, "Merge" is used.
+                    (Alpha) Using the field requires the SupplementalGroupsPolicy feature gate to be enabled
+                    and the container runtime must implement support for this feature.
+                    Note that this field cannot be set when spec.os.name is windows.
                   type: string
                 sysctls:
+                  description: |-
+                    Sysctls hold a list of namespaced sysctls used for the pod. Pods with unsupported
+                    sysctls (by the container runtime) might fail to launch.
+                    Note that this field cannot be set when spec.os.name is windows.
                   items:
+                    description: Sysctl defines a kernel parameter to be set
                     properties:
                       name:
+                        description: Name of a property to set
                         type: string
                       value:
+                        description: Value of a property to set
                         type: string
+                    required:
+                      - name
+                      - value
                     type: object
                   type: array
+                  x-kubernetes-list-type: atomic
                 windowsOptions:
+                  description: |-
+                    The Windows specific settings applied to all containers.
+                    If unspecified, the options within a container's SecurityContext will be used.
+                    If set in both SecurityContext and PodSecurityContext, the value specified in SecurityContext takes precedence.
+                    Note that this field cannot be set when spec.os.name is linux.
                   properties:
                     gmsaCredentialSpec:
+                      description: |-
+                        GMSACredentialSpec is where the GMSA admission webhook
+                        (https://github.com/kubernetes-sigs/windows-gmsa) inlines the contents of the
+                        GMSA credential spec named by the GMSACredentialSpecName field.
                       type: string
                     gmsaCredentialSpecName:
+                      description: GMSACredentialSpecName is the name of the GMSA credential spec to use.
                       type: string
                     hostProcess:
+                      description: |-
+                        HostProcess determines if a container should be run as a 'Host Process' container.
+                        All of a Pod's containers must have the same effective HostProcess value
+                        (it is not allowed to have a mix of HostProcess containers and non-HostProcess containers).
+                        In addition, if HostProcess is true then HostNetwork must also be set to true.
                       type: boolean
                     runAsUserName:
+                      description: |-
+                        The UserName in Windows to run the entrypoint of the container process.
+                        Defaults to the user specified in image metadata if unspecified.
+                        May also be set in PodSecurityContext. If set in both SecurityContext and
+                        PodSecurityContext, the value specified in SecurityContext takes precedence.
                       type: string
                   type: object
               type: object
             servedModelName:
+              description: |-
+                ServedModelName is the model name the image expects in requests. The
+                connection details report it, and the AI Gateway rewrites the Instance
+                name to it. Requires image.
               type: string
             serviceAccountName:
+              description: |-
+                ServiceAccountName is the ServiceAccount the predictor pods run as (e.g.
+                one bound to cloud IAM for model downloads). Empty uses the namespace
+                default.
               type: string
             storageContainer:
+              description: |-
+                StorageContainer names a ClusterStorageContainer. When set, KServe uses
+                that initializer instead of matching on the storage URI scheme
+                (spec.predictor.storageContainerName), e.g. one with a larger memory limit
+                for big models. It must exist, be enabled, and support StorageURI.
               type: string
             storageURI:
+              description: |-
+                StorageURI is the location of the model artifacts (s3://, gs://, hf://,
+                pvc://, oci:// or a local path).
               type: string
             task:
+              description: |-
+                Task selects the huggingface runtime task (--task), e.g. text_embedding
+                or sequence_classification. Empty lets the runtime infer it from the
+                model config. Only valid with modelFormat huggingface; a --task in Args
+                wins.
               type: string
           type: object
       type: modelServer
@@ -417,66 +1038,161 @@ spec:
         llmEngine: {}
       parametersSchema:
         openAPIV3Schema:
+          description: |-
+            LlmTopologyParameters defines the topology-level parameters for the llm
+            topology. Component-level parameters (model URI, parallelism, etc.) live on
+            the llmEngine component; these are cross-cutting deployment options that
+            shape the generated LLMInferenceService.
           properties:
             enableAIGateway:
+              description: |-
+                EnableAIGateway exposes the model through the shared Envoy AI Gateway.
+                Legacy alias for ExternalAccess=EnvoyAIGateway when ExternalAccess is unset.
               type: boolean
             enableGatewayRouting:
+              description: |-
+                EnableGatewayRouting provisions a managed Gateway API route plus an
+                Inference Gateway scheduler (Endpoint Picker) for prefix-cache aware
+                routing across replicas. When false, the LLMInferenceService is exposed
+                with its default networking. Envoy AI Gateway implies gateway routing.
               type: boolean
             enableMetrics:
+              description: |-
+                EnableMetrics emits a Prometheus Operator PodMonitor for this instance's
+                vLLM pods (/metrics). Nil/unset defaults to true for backward compatibility.
               type: boolean
             enablePrefill:
+              description: |-
+                EnablePrefill turns on disaggregated serving by creating a separate
+                prefill deployment in addition to the decode workload (llm-d pattern).
               type: boolean
             enableTracing:
+              description: |-
+                EnableTracing turns on KServe's built-in distributed tracing (OTLP) across
+                the gateway, scheduler and model components. Disabled by default. When
+                enabled without an endpoint, KServe applies its default OTLP exporter,
+                sampler and sampler-arg settings.
               type: boolean
             externalAccess:
+              description: |-
+                ExternalAccess is the client access path shown in the Routing UI:
+                ClusterIP, LoadBalancer, NodePort, or EnvoyAIGateway. When set it takes
+                precedence over EnableAIGateway and llmEngine.service.serviceType.
               type: string
             prefillMaxReplicas:
+              description: |-
+                PrefillMaxReplicas is the WVA autoscaling ceiling for the prefill
+                workload. Required when prefill autoscaling is enabled.
               format: int32
               type: integer
             prefillMinReplicas:
+              description: |-
+                PrefillMinReplicas is the WVA autoscaling floor for the prefill workload.
+                Setting PrefillMinReplicas or PrefillMaxReplicas enables
+                spec.prefill.scaling, and PrefillReplicas is then ignored.
+                Requires EnablePrefill. KServe requires ≥ 1.
               format: int32
               type: integer
             prefillPipelineParallelSize:
+              description: |-
+                PrefillPipelineParallelSize is vLLM pipeline parallelism for the prefill
+                workload. Required when PrefillWorkerCount is set (must equal
+                PrefillWorkerCount + 1). Alone it is a flag only — no prefill workers.
               format: int32
               type: integer
             prefillReplicas:
+              description: |-
+                PrefillReplicas sets the number of replicas for the prefill workload.
+                Only used when EnablePrefill is true. Ignored when prefill autoscaling
+                (PrefillMinReplicas / PrefillMaxReplicas) is set.
               format: int32
               type: integer
             prefillScalingActuator:
+              description: |-
+                PrefillScalingActuator selects the prefill WVA actuator: "keda" (default)
+                or "hpa". When both decode and prefill autoscale, KServe requires the
+                same actuator on both sides.
               type: string
             prefillWorkerCount:
+              description: |-
+                PrefillWorkerCount is extra prefill worker pods besides the prefill head.
+                Presence turns on spec.prefill.worker. Requires EnablePrefill.
               format: int32
               type: integer
             prefillWorkerResources:
+              description: |-
+                PrefillWorkerResources are optional resources for prefill worker pods.
+                Unset copies llmEngine.resources. Requires PrefillWorkerCount.
               properties:
                 claims:
+                  description: |-
+                    Claims lists the names of resources, defined in spec.resourceClaims,
+                    that are used by this container.
+
+                    This field depends on the
+                    DynamicResourceAllocation feature gate.
+
+                    This field is immutable. It can only be set for containers.
                   items:
+                    description: ResourceClaim references one entry in PodSpec.ResourceClaims.
                     properties:
                       name:
+                        description: |-
+                          Name must match the name of one entry in pod.spec.resourceClaims of
+                          the Pod where this field is used. It makes that resource available
+                          inside a container.
                         type: string
                       request:
+                        description: |-
+                          Request is the name chosen for a request in the referenced claim.
+                          If empty, everything from the claim is made available, otherwise
+                          only the result of this request.
                         type: string
+                    required:
+                      - name
                     type: object
                   type: array
+                  x-kubernetes-list-map-keys:
+                    - name
+                  x-kubernetes-list-type: map
                 limits:
                   additionalProperties:
-                    properties:
-                      format:
-                        type: string
-                    type: object
+                    anyOf:
+                      - type: integer
+                      - type: string
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  description: |-
+                    Limits describes the maximum amount of compute resources allowed.
+                    More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                   type: object
                 requests:
                   additionalProperties:
-                    properties:
-                      format:
-                        type: string
-                    type: object
+                    anyOf:
+                      - type: integer
+                      - type: string
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  description: |-
+                    Requests describes the minimum amount of compute resources required.
+                    If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                    otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                    More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                   type: object
               type: object
             tokenLimitPerHour:
+              description: |-
+                TokenLimitPerHour is the per-API-key token quota for this model. It is used
+                only when the Envoy AI Gateway is selected and the provider has a
+                Redis-compatible rate-limit backend configured. Zero/unset uses the
+                default limit.
               format: int32
               type: integer
             tracingEndpoint:
+              description: |-
+                TracingEndpoint overrides the OTLP exporter endpoint
+                (OTEL_EXPORTER_OTLP_ENDPOINT). Only used when EnableTracing is true; empty
+                keeps KServe's default collector endpoint.
               type: string
           type: object
     predictor:
@@ -484,12 +1200,29 @@ spec:
         predictor: {}
       parametersSchema:
         openAPIV3Schema:
+          description: |-
+            PredictorTopologyParameters defines the topology-level parameters for the
+            predictor topology. Per-model configuration lives on the predictor component;
+            these are cross-cutting deployment options that shape the generated
+            InferenceService.
           properties:
             enableMetrics:
+              description: |-
+                EnableMetrics emits a Prometheus Operator PodMonitor for the predictor
+                pods. Unset means enabled, as for the llm topology.
               type: boolean
             externalAccess:
+              description: |-
+                ExternalAccess is the client access path: ClusterIP, LoadBalancer,
+                NodePort, or EnvoyAIGateway (embedding models and custom containers
+                that serve the OpenAI or TypeSafe API, through the provider's shared
+                Gateway). When set it takes precedence over predictor.service.serviceType.
               type: string
             tokenLimitPerHour:
+              description: |-
+                TokenLimitPerHour is the per-API-key token quota for this model through
+                the Envoy AI Gateway. Used only with a Redis-compatible rate-limit
+                backend; unset uses the provider default.
               format: int32
               type: integer
           type: object
@@ -1326,7 +2059,7 @@ spec:
                 policy:
                   uiType: widget
                   widgetType: podSchedulingPolicy
-              groupType: toggleable
+              groupType: bordered
               label: Pod scheduling policy
               uiType: group
           label: Scheduling
@@ -1698,7 +2431,7 @@ spec:
                 policy:
                   uiType: widget
                   widgetType: podSchedulingPolicy
-              groupType: toggleable
+              groupType: bordered
               label: Pod scheduling policy
               uiType: group
           label: Scheduling

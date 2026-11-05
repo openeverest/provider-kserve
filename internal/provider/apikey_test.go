@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -174,23 +175,23 @@ func TestValidateAIGatewayAccess(t *testing.T) {
 
 	t.Run("rejects plain HTTP", func(t *testing.T) {
 		gatewayEnv(t, "http", "false")
-		if err := validateAIGatewayAccess(newContext(t), "llama", "pick another name"); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		if err := validateAIGatewayChart(field.NewPath("externalAccess"), "EnvoyAIGateway").ToAggregate(); err == nil || !strings.Contains(err.Error(), "HTTPS") {
 			t.Fatalf("err = %v, want HTTPS requirement", err)
 		}
 	})
 
 	t.Run("allows plain HTTP when explicitly allowed", func(t *testing.T) {
 		gatewayEnv(t, "http", "true")
-		if err := validateAIGatewayAccess(newContext(t), "llama", "pick another name"); err != nil {
+		if err := validateAIGatewayChart(field.NewPath("externalAccess"), "EnvoyAIGateway").ToAggregate(); err != nil {
 			t.Fatal(err)
 		}
 	})
 
-	t.Run("rejects a model name served by another route", func(t *testing.T) {
+	t.Run("finds a model name served by another route", func(t *testing.T) {
 		gatewayEnv(t, "https", "false")
 		other := aiGatewayRouteObject("other", "chat-ai-gateway", "gw", "gw-ns", "llama")
-		if err := validateAIGatewayAccess(newContext(t, other), "llama", "pick another name"); err == nil || !strings.Contains(err.Error(), "other/chat-ai-gateway") {
-			t.Fatalf("err = %v, want conflict with other/chat-ai-gateway", err)
+		if route, err := aiGatewayRouteServing(newContext(t, other), "llama"); err != nil || route != "other/chat-ai-gateway" {
+			t.Fatalf("route = %q, err = %v, want other/chat-ai-gateway", route, err)
 		}
 	})
 
@@ -198,8 +199,8 @@ func TestValidateAIGatewayAccess(t *testing.T) {
 		gatewayEnv(t, "https", "false")
 		own := aiGatewayRouteObject("ns", "llama-ai-gateway", "gw", "gw-ns", "llama")
 		elsewhere := aiGatewayRouteObject("other", "chat-ai-gateway", "another-gw", "gw-ns", "llama")
-		if err := validateAIGatewayAccess(newContext(t, own, elsewhere), "llama", "pick another name"); err != nil {
-			t.Fatal(err)
+		if route, err := aiGatewayRouteServing(newContext(t, own, elsewhere), "llama"); err != nil || route != "" {
+			t.Fatalf("route = %q, err = %v, want none", route, err)
 		}
 	})
 }
@@ -213,7 +214,7 @@ func TestValidateLLMChecksAIGatewayAccess(t *testing.T) {
 	c := llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{
 		ExternalAccess: llm.ExternalAccessEnvoyAIGateway,
 	})
-	if err := validateLLM(c); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+	if err := validateLLM(c.Instance()).ToAggregate(); err == nil || !strings.Contains(err.Error(), "HTTPS") {
 		t.Fatalf("err = %v, want HTTPS requirement", err)
 	}
 }

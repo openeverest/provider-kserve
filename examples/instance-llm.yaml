@@ -21,7 +21,7 @@ spec:
 
   # High-level version bundle — selects a curated vLLM runtime version.
   # Omit to use the provider's default bundle.
-  version: "0.15"
+  version: "0.21"
 
   # Topology configuration — LLM serving.
   topology:

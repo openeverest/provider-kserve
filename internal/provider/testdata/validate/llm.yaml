@@ -1,0 +1,16 @@
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: llama
+spec:
+  providerRef:
+    name: provider-kserve
+  topology:
+    type: llm
+    parameters:
+      externalAccess: ClusterIP
+  components:
+    llmEngine:
+      replicas: 1
+      parameters:
+        modelURI: hf://Qwen/Qwen3-0.6B

@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
@@ -107,7 +108,7 @@ func TestValidateLoRAParams(t *testing.T) {
 					{Name: "dup", URI: "hf://org/b"},
 				},
 			},
-		})
+		}, field.NewPath("parameters")).ToAggregate()
 		if err == nil {
 			t.Fatal("expected error for duplicate adapter name")
 		}
@@ -122,7 +123,7 @@ func TestValidateLoRAParams(t *testing.T) {
 					{Name: "base-model", URI: "hf://org/a"},
 				},
 			},
-		})
+		}, field.NewPath("parameters")).ToAggregate()
 		if err == nil {
 			t.Fatal("expected error when adapter name equals base model name")
 		}
@@ -137,7 +138,7 @@ func TestValidateLoRAParams(t *testing.T) {
 					{Name: "ft", URI: "hf://org/a"},
 				},
 			},
-		})
+		}, field.NewPath("parameters")).ToAggregate()
 		if err == nil {
 			t.Fatal("expected error when hf adapter needs storage initializer")
 		}
@@ -151,7 +152,7 @@ func TestValidateLoRAParams(t *testing.T) {
 					{Name: "ft-v1", URI: "hf://org/a"},
 				},
 			},
-		}); err != nil {
+		}, field.NewPath("parameters")).ToAggregate(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -161,7 +162,7 @@ func TestValidateLoRAParams(t *testing.T) {
 		err := validateLoRAParams("inst", components.VllmCustomSpec{
 			ModelURI:       base.ModelURI,
 			LoraDeployment: components.LoraDeploymentEnabled,
-		})
+		}, field.NewPath("parameters")).ToAggregate()
 		if err == nil {
 			t.Fatal("expected error when enabled with no slots")
 		}
@@ -173,7 +174,7 @@ func TestValidateLoRAParams(t *testing.T) {
 			ModelURI:       base.ModelURI,
 			LoraDeployment: components.LoraDeploymentEnabled,
 			LoraSlot1:      "missing",
-		})
+		}, field.NewPath("parameters")).ToAggregate()
 		if err == nil {
 			t.Fatal("expected error for unknown catalog adapter")
 		}
@@ -186,7 +187,7 @@ func TestValidateLoRAParams(t *testing.T) {
 			LoraDeployment: components.LoraDeploymentEnabled,
 			LoraSlot1:      "sql-lora",
 			LoraSlot2:      "sql-lora",
-		})
+		}, field.NewPath("parameters")).ToAggregate()
 		if err == nil {
 			t.Fatal("expected error for duplicate slot selection")
 		}
@@ -198,7 +199,7 @@ func TestValidateLoRAParams(t *testing.T) {
 			ModelURI:       base.ModelURI,
 			LoraDeployment: components.LoraDeploymentEnabled,
 			LoraSlot1:      "sql-lora",
-		}); err != nil {
+		}, field.NewPath("parameters")).ToAggregate(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -256,7 +257,7 @@ func TestValidateWorkloadScaling(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := validateWorkloadScaling(tc.s, "minReplicas", "maxReplicas", "scalingActuator")
+			err := validateWorkloadScaling(tc.s, field.NewPath("minReplicas"), field.NewPath("maxReplicas"), field.NewPath("scalingActuator")).ToAggregate()
 			if tc.wantErr != (err != nil) {
 				t.Fatalf("validateWorkloadScaling() error = %v, wantErr %v", err, tc.wantErr)
 			}
@@ -370,7 +371,7 @@ func TestValidateLLMScaling(t *testing.T) {
 		t.Parallel()
 		if err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{
 			MaxReplicas: ptr.To(int32(4)),
-		}, llm.LlmTopologyParameters{})); err != nil {
+		}, llm.LlmTopologyParameters{}).Instance()).ToAggregate(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -380,7 +381,7 @@ func TestValidateLLMScaling(t *testing.T) {
 		t.Parallel()
 		if err := validateLLM(llmContext(t, ptr.To(int32(2)), components.VllmCustomSpec{
 			MaxReplicas: ptr.To(int32(4)),
-		}, llm.LlmTopologyParameters{})); err != nil {
+		}, llm.LlmTopologyParameters{}).Instance()).ToAggregate(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -391,7 +392,7 @@ func TestValidateLLMScaling(t *testing.T) {
 			EnablePrefill:      true,
 			PrefillReplicas:    ptr.To(int32(3)),
 			PrefillMaxReplicas: ptr.To(int32(6)),
-		})); err != nil {
+		}).Instance()).ToAggregate(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -400,7 +401,7 @@ func TestValidateLLMScaling(t *testing.T) {
 		t.Parallel()
 		err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{
 			PrefillMaxReplicas: ptr.To(int32(4)),
-		}))
+		}).Instance()).ToAggregate()
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -415,7 +416,7 @@ func TestValidateLLMScaling(t *testing.T) {
 			EnablePrefill:          true,
 			PrefillMaxReplicas:     ptr.To(int32(4)),
 			PrefillScalingActuator: components.ScalingActuatorKEDA,
-		}))
+		}).Instance()).ToAggregate()
 		if err == nil {
 			t.Fatal("expected actuator mismatch error")
 		}
@@ -456,7 +457,7 @@ func TestValidateWorkerGroup(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := validateWorkerGroup(tc.count, tc.pp, tc.resourcesSet, "workerCount", "pipelineParallelSize", "workerResources")
+			err := validateWorkerGroup(tc.count, tc.pp, tc.resourcesSet, field.NewPath("workerCount"), field.NewPath("pipelineParallelSize"), field.NewPath("workerResources")).ToAggregate()
 			if tc.wantErr != (err != nil) {
 				t.Fatalf("error = %v, wantErr %v", err, tc.wantErr)
 			}
@@ -466,22 +467,22 @@ func TestValidateWorkerGroup(t *testing.T) {
 
 func TestValidateTensorGPU(t *testing.T) {
 	t.Parallel()
-	if err := validateTensorGPU(nil, ptr.To(int32(8)), false, "res"); err != nil {
+	if err := validateTensorGPU(nil, ptr.To(int32(8)), false, field.NewPath("res")).ToAggregate(); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateTensorGPU(gpuResources("8"), ptr.To(int32(8)), false, "res"); err != nil {
+	if err := validateTensorGPU(gpuResources("8"), ptr.To(int32(8)), false, field.NewPath("res")).ToAggregate(); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateTensorGPU(gpuResources("1"), ptr.To(int32(8)), false, "res"); err == nil {
+	if err := validateTensorGPU(gpuResources("1"), ptr.To(int32(8)), false, field.NewPath("res")).ToAggregate(); err == nil {
 		t.Fatal("expected GPU < TP error")
 	}
-	if err := validateTensorGPU(gpuResources("1"), ptr.To(int32(8)), true, "res"); err != nil {
+	if err := validateTensorGPU(gpuResources("1"), ptr.To(int32(8)), true, field.NewPath("res")).ToAggregate(); err != nil {
 		t.Fatal(err)
 	}
 	// Limits govern scheduling; requests-only GPU is not compared to tensorParallelSize.
 	if err := validateTensorGPU(&corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{nvidiaGPUResource: resource.MustParse("1")},
-	}, ptr.To(int32(8)), false, "res"); err != nil {
+	}, ptr.To(int32(8)), false, field.NewPath("res")).ToAggregate(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -494,7 +495,7 @@ func TestValidateLLMWorkers(t *testing.T) {
 		if err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{
 			WorkerCount:          ptr.To(int32(1)),
 			PipelineParallelSize: ptr.To(int32(2)),
-		}, llm.LlmTopologyParameters{})); err != nil {
+		}, llm.LlmTopologyParameters{}).Instance()).ToAggregate(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -503,7 +504,7 @@ func TestValidateLLMWorkers(t *testing.T) {
 		t.Parallel()
 		if err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{
 			PipelineParallelSize: ptr.To(int32(2)),
-		}, llm.LlmTopologyParameters{})); err != nil {
+		}, llm.LlmTopologyParameters{}).Instance()).ToAggregate(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -512,7 +513,7 @@ func TestValidateLLMWorkers(t *testing.T) {
 		t.Parallel()
 		err := validateLLM(llmContextWithResources(t, nil, gpuResources("1"), components.VllmCustomSpec{
 			TensorParallelSize: ptr.To(int32(8)),
-		}, llm.LlmTopologyParameters{}))
+		}, llm.LlmTopologyParameters{}).Instance()).ToAggregate()
 		if err == nil {
 			t.Fatal("expected GPU/TP error")
 		}
@@ -523,7 +524,7 @@ func TestValidateLLMWorkers(t *testing.T) {
 		err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{
 			PrefillWorkerCount:          ptr.To(int32(1)),
 			PrefillPipelineParallelSize: ptr.To(int32(2)),
-		}))
+		}).Instance()).ToAggregate()
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -533,7 +534,7 @@ func TestValidateLLMWorkers(t *testing.T) {
 		t.Parallel()
 		if err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{
 			PrefillPipelineParallelSize: ptr.To(int32(2)),
-		})); err != nil {
+		}).Instance()).ToAggregate(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -543,7 +544,7 @@ func TestValidateLLMWorkers(t *testing.T) {
 		if err := validateLLM(llmContextWithResources(t, nil, gpuResources("1"), components.VllmCustomSpec{
 			ComputeProfile:     "cpu",
 			TensorParallelSize: ptr.To(int32(8)),
-		}, llm.LlmTopologyParameters{})); err != nil {
+		}, llm.LlmTopologyParameters{}).Instance()).ToAggregate(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -557,7 +558,7 @@ func TestValidateLLMWorkers(t *testing.T) {
 			WorkerResources: &corev1.ResourceRequirements{
 				Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4")},
 			},
-		}, llm.LlmTopologyParameters{}))
+		}, llm.LlmTopologyParameters{}).Instance()).ToAggregate()
 		if err == nil {
 			t.Fatal("expected GPU/TP error on overlaid worker resources")
 		}
@@ -877,7 +878,7 @@ func TestValidateLLMGpuCount(t *testing.T) {
 		err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{
 			ComputeProfile: "cpu",
 			GpuCount:       ptr.To(int32(1)),
-		}, llm.LlmTopologyParameters{}))
+		}, llm.LlmTopologyParameters{}).Instance()).ToAggregate()
 		if err == nil {
 			t.Fatal("expected error for gpuCount on cpu profile")
 		}
@@ -888,7 +889,7 @@ func TestValidateLLMGpuCount(t *testing.T) {
 		err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{
 			GpuCount:           ptr.To(int32(1)),
 			TensorParallelSize: ptr.To(int32(2)),
-		}, llm.LlmTopologyParameters{}))
+		}, llm.LlmTopologyParameters{}).Instance()).ToAggregate()
 		if err == nil {
 			t.Fatal("expected GPU/TP error")
 		}
@@ -899,7 +900,7 @@ func TestValidateLLMGpuCount(t *testing.T) {
 		if err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{
 			GpuCount:           ptr.To(int32(2)),
 			TensorParallelSize: ptr.To(int32(2)),
-		}, llm.LlmTopologyParameters{})); err != nil {
+		}, llm.LlmTopologyParameters{}).Instance()).ToAggregate(); err != nil {
 			t.Fatal(err)
 		}
 	})

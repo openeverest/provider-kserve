@@ -73,7 +73,15 @@ func TestValidatePredictorAIGateway(t *testing.T) {
 			cl := fake.NewClientBuilder().WithScheme(testScheme(t)).WithRESTMapper(mapper).WithObjects(tc.routes...).Build()
 			c := predictorContext(t, cl, corev1alpha1.ComponentSpec{Parameters: rawJSON(t, tc.params)})
 			c.Instance().Spec.Topology.Parameters = rawJSON(t, tc.topo)
-			err := validatePredictor(c)
+			errs := validatePredictor(c.Instance())
+			if len(errs) == 0 {
+				refErrs, err := (&Provider{}).ValidateReferences(c)
+				if err != nil {
+					t.Fatal(err)
+				}
+				errs = refErrs
+			}
+			err := errs.ToAggregate()
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatal(err)

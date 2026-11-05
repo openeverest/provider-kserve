@@ -32,7 +32,9 @@ spec:
               metadata:
                 name: test-predictor-custom-invalid
               status:
-                phase: Failed
+                (conditions[?type == 'Ready']):
+                  - status: "False"
+                    reason: ValidationFailed
         - error:
             resource:
               apiVersion: serving.kserve.io/v1beta1

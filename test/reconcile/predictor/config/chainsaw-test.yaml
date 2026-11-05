@@ -41,7 +41,9 @@ spec:
               metadata:
                 name: test-predictor-config
               status:
-                phase: Failed
+                (conditions[?type == 'Ready']):
+                  - status: "False"
+                    reason: InvalidReference
         - assert:
             file: 00-assert.yaml
 
@@ -86,7 +88,9 @@ spec:
               metadata:
                 name: test-predictor-config-malformed
               status:
-                phase: Failed
+                (conditions[?type == 'Ready']):
+                  - status: "False"
+                    reason: ValidationFailed
         - assert:
             resource:
               apiVersion: core.openeverest.io/v1alpha1
@@ -94,7 +98,9 @@ spec:
               metadata:
                 name: test-predictor-config-unknown
               status:
-                phase: Failed
+                (conditions[?type == 'Ready']):
+                  - status: "False"
+                    reason: InvalidReference
         - error:
             resource:
               apiVersion: serving.kserve.io/v1beta1

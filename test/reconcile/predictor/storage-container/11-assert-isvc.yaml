@@ -1,5 +1,5 @@
-# Validation errors requeue with backoff, so the Instance reconciles once the
-# referenced ClusterStorageContainer appears.
+# Reference errors are rechecked every minute, so the Instance reconciles once
+# the referenced ClusterStorageContainer appears.
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:

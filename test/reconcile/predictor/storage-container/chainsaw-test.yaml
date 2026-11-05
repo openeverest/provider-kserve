@@ -40,6 +40,8 @@ spec:
             file: 10-errors.yaml
 
     - name: storage-container-created-later
+      timeouts:
+        assert: 2m
       try:
         - apply:
             file: 11-storage-container.yaml

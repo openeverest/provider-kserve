@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 
 	"github.com/openeverest/provider-kserve/definition/components"
@@ -33,12 +34,12 @@ func TestValidateLLMModelSource(t *testing.T) {
 		{
 			name:    "oci with disabled storage initializer",
 			params:  components.VllmCustomSpec{ModelURI: "oci://quay.io/org/model:v1", DisableStorageInitializer: ptr.To(true)},
-			wantErr: "disableStorageInitializer must be false for oci:// models",
+			wantErr: "must be false for oci:// models",
 		},
 		{
 			name:    "oci native with disabled storage initializer",
 			params:  components.VllmCustomSpec{ModelURI: "oci+native://quay.io/org/model:v1", DisableStorageInitializer: ptr.To(true)},
-			wantErr: "disableStorageInitializer must be false for oci+native:// models",
+			wantErr: "must be false for oci+native:// models",
 		},
 		{
 			name:   "oci with storage initializer explicitly on",
@@ -50,7 +51,7 @@ func TestValidateLLMModelSource(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := validateLLMModelSource(tc.params)
+			err := validateLLMModelSource(tc.params, field.NewPath("parameters")).ToAggregate()
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("validateLLMModelSource() = %v, want nil", err)
@@ -66,7 +67,7 @@ func TestValidateLLMModelSource(t *testing.T) {
 
 func TestValidateLLMRejectsUnsupportedModelScheme(t *testing.T) {
 	t.Parallel()
-	err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{ModelURI: "gs://bucket/model"}, llm.LlmTopologyParameters{}))
+	err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{ModelURI: "gs://bucket/model"}, llm.LlmTopologyParameters{}).Instance()).ToAggregate()
 	if err == nil || !strings.Contains(err.Error(), "modelURI") {
 		t.Fatalf("validateLLM() = %v, want modelURI scheme error", err)
 	}

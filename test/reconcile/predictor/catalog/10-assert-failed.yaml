@@ -3,4 +3,6 @@ kind: Instance
 metadata:
   name: test-predictor-catalog-unknown
 status:
-  phase: Failed
+  (conditions[?type == 'Ready']):
+    - status: "False"
+      reason: ValidationFailed

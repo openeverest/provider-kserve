@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 	"knative.dev/pkg/apis"
 	"sigs.k8s.io/yaml"
@@ -15,6 +16,7 @@ import (
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
 
 	commonv1alpha1 "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
+	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-kserve/definition/components"
@@ -74,144 +76,127 @@ func workloadPodSelector(instance string) map[string]string {
 }
 
 // validateLLM checks the Instance spec for the llm topology.
-func validateLLM(c *controller.Context) error {
-	comp, ok := c.Instance().Spec.Components[common.ComponentLlmEngine]
-	if !ok {
-		return fmt.Errorf("the %q component is required for the %q topology", common.ComponentLlmEngine, common.TopologyLLM)
-	}
+func validateLLM(in *corev1alpha1.Instance) field.ErrorList {
+	comp := in.Spec.Components[common.ComponentLlmEngine]
+	paramsPath := llmEnginePath.Child("parameters")
 
+	var errs field.ErrorList
 	var params components.VllmCustomSpec
-	c.TryDecodeComponentParameters(comp, &params)
+	decodeParameters(comp.Parameters, &params)
 	if params.ModelURI == "" {
-		return fmt.Errorf("%s.parameters.modelURI is required", common.ComponentLlmEngine)
-	}
-	if _, err := apis.ParseURL(params.ModelURI); err != nil {
-		return fmt.Errorf("invalid %s.parameters.modelURI %q: %w", common.ComponentLlmEngine, params.ModelURI, err)
-	}
-	if err := validateLLMModelSource(params); err != nil {
-		return err
+		errs = append(errs, field.Required(paramsPath.Child("modelURI"), ""))
+	} else if _, err := apis.ParseURL(params.ModelURI); err != nil {
+		errs = append(errs, field.Invalid(paramsPath.Child("modelURI"), params.ModelURI, err.Error()))
+	} else {
+		errs = append(errs, validateLLMModelSource(params, paramsPath)...)
 	}
 	if comp.Replicas != nil && *comp.Replicas < 0 {
-		return fmt.Errorf("%s replicas must not be negative", common.ComponentLlmEngine)
+		errs = append(errs, field.Invalid(llmEnginePath.Child("replicas"), *comp.Replicas, "must not be negative"))
 	}
 	if params.DataParallelSize != nil && *params.DataParallelSize > 1 &&
 		params.PipelineParallelSize != nil && *params.PipelineParallelSize > 1 {
-		return fmt.Errorf("%s.parameters: dataParallelSize and pipelineParallelSize are mutually exclusive; set only one", common.ComponentLlmEngine)
+		errs = append(errs, field.Invalid(paramsPath.Child("dataParallelSize"), *params.DataParallelSize, "cannot be combined with pipelineParallelSize above 1; set only one"))
 	}
 	if strings.TrimSpace(params.Config) != "" {
 		if _, err := parseLLMConfigSpec(params.Config); err != nil {
-			return err
+			errs = append(errs, field.Invalid(paramsPath.Child("config"), field.OmitValueType{}, err.Error()))
 		}
 	}
-	if err := validateEngine(params.Engine); err != nil {
-		return err
-	}
+	errs = append(errs, validateEngine(params.Engine, paramsPath.Child("engine"))...)
 	if comp.Service != nil {
 		switch comp.Service.ServiceType {
 		case "", corev1.ServiceTypeClusterIP, corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeNodePort:
 		default:
-			return fmt.Errorf("%s.service.serviceType must be one of ClusterIP, LoadBalancer or NodePort", common.ComponentLlmEngine)
+			errs = append(errs, field.NotSupported(llmEnginePath.Child("service", "serviceType"), comp.Service.ServiceType, []corev1.ServiceType{
+				corev1.ServiceTypeClusterIP, corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeNodePort,
+			}))
 		}
 	}
 
 	var topo llm.LlmTopologyParameters
-	c.TryDecodeTopologyParameters(&topo)
+	decodeParameters(in.GetTopologyParameters(), &topo)
+	accessPath := topologyParametersPath.Child("externalAccess")
 	switch topo.ExternalAccess {
 	case "", llm.ExternalAccessClusterIP, llm.ExternalAccessLoadBalancer, llm.ExternalAccessNodePort, llm.ExternalAccessEnvoyAIGateway:
 	default:
-		return fmt.Errorf("externalAccess must be one of ClusterIP, LoadBalancer, NodePort or EnvoyAIGateway")
-	}
-	if topo.UsesAIGateway() && !common.AIGatewayEnabled() {
-		return fmt.Errorf("externalAccess EnvoyAIGateway requires aiGateway.enabled in the provider chart")
+		errs = append(errs, field.NotSupported(accessPath, topo.ExternalAccess, []string{
+			llm.ExternalAccessClusterIP, llm.ExternalAccessLoadBalancer, llm.ExternalAccessNodePort, llm.ExternalAccessEnvoyAIGateway,
+		}))
 	}
 	if topo.UsesAIGateway() {
-		if err := validateAIGatewayAccess(c, servedModelName(c.Name(), params.ModelName), fmt.Sprintf("set a different %s.parameters.modelName", common.ComponentLlmEngine)); err != nil {
-			return err
-		}
+		errs = append(errs, validateAIGatewayChart(accessPath, topo.ExternalAccess)...)
 	}
-	if topo.TokenLimitPerHour != nil {
-		if !topo.UsesAIGateway() {
-			return fmt.Errorf("tokenLimitPerHour requires External access = EnvoyAIGateway")
-		}
-		if *topo.TokenLimitPerHour < 1 {
-			return fmt.Errorf("tokenLimitPerHour must be greater than zero")
+	if limit := topo.TokenLimitPerHour; limit != nil {
+		switch {
+		case !topo.UsesAIGateway():
+			errs = append(errs, field.Forbidden(topologyParametersPath.Child("tokenLimitPerHour"), "requires externalAccess EnvoyAIGateway"))
+		case *limit < 1:
+			errs = append(errs, field.Invalid(topologyParametersPath.Child("tokenLimitPerHour"), *limit, "must be greater than zero"))
 		}
 	}
 	decode := decodeScaling(params)
-	if err := validateWorkloadScaling(
+	errs = append(errs, validateWorkloadScaling(
 		decode,
-		common.ComponentLlmEngine+".parameters.minReplicas",
-		common.ComponentLlmEngine+".parameters.maxReplicas",
-		common.ComponentLlmEngine+".parameters.scalingActuator",
-	); err != nil {
-		return err
-	}
+		paramsPath.Child("minReplicas"),
+		paramsPath.Child("maxReplicas"),
+		paramsPath.Child("scalingActuator"),
+	)...)
 	// replicas is ignored while autoscaling is on (buildLLMInferenceService
 	// uses spec.scaling instead). The UI always sends a replica count, so
 	// rejecting the pair would make autoscaling impossible to turn on there.
 	prefill := prefillScaling(topo)
 	if prefill.enabled() && !topo.EnablePrefill {
-		return fmt.Errorf("prefill autoscaling requires enablePrefill")
+		errs = append(errs, field.Invalid(topologyParametersPath.Child("enablePrefill"), false, "must be true for prefill autoscaling"))
 	}
-	if err := validateWorkloadScaling(
+	errs = append(errs, validateWorkloadScaling(
 		prefill,
-		"topology.parameters.prefillMinReplicas",
-		"topology.parameters.prefillMaxReplicas",
-		"topology.parameters.prefillScalingActuator",
-	); err != nil {
-		return err
-	}
+		topologyParametersPath.Child("prefillMinReplicas"),
+		topologyParametersPath.Child("prefillMaxReplicas"),
+		topologyParametersPath.Child("prefillScalingActuator"),
+	)...)
 	if decode.enabled() && prefill.enabled() && resolvedActuator(decode.actuator) != resolvedActuator(prefill.actuator) {
-		return fmt.Errorf("decode and prefill must use the same scalingActuator (KServe WVA)")
+		errs = append(errs, field.Invalid(topologyParametersPath.Child("prefillScalingActuator"), prefill.actuator,
+			"must match the decode scalingActuator (KServe WVA)"))
 	}
-	if err := validateWorkerGroup(
+	errs = append(errs, validateWorkerGroup(
 		params.WorkerCount,
 		params.PipelineParallelSize,
 		params.WorkerResources != nil,
-		common.ComponentLlmEngine+".parameters.workerCount",
-		common.ComponentLlmEngine+".parameters.pipelineParallelSize",
-		common.ComponentLlmEngine+".parameters.workerResources",
-	); err != nil {
-		return err
-	}
+		paramsPath.Child("workerCount"),
+		paramsPath.Child("pipelineParallelSize"),
+		paramsPath.Child("workerResources"),
+	)...)
 	cpuProfile := strings.EqualFold(params.ComputeProfile, computeProfileCPU)
+	gpuPath := llmEnginePath.Child("resources")
 	if params.GpuCount != nil {
-		if cpuProfile {
-			return fmt.Errorf("%s.parameters.gpuCount is only valid for the GPU compute profile", common.ComponentLlmEngine)
-		}
-		if *params.GpuCount < 1 {
-			return fmt.Errorf("%s.parameters.gpuCount must be at least 1", common.ComponentLlmEngine)
+		gpuPath = paramsPath.Child("gpuCount")
+		switch {
+		case cpuProfile:
+			errs = append(errs, field.Invalid(gpuPath, *params.GpuCount, "is only valid for the GPU compute profile"))
+		case *params.GpuCount < 1:
+			errs = append(errs, field.Invalid(gpuPath, *params.GpuCount, "must be at least 1"))
 		}
 	}
 	effRes := withGPUCount(comp.Resources, params.GpuCount, cpuProfile)
-	if err := validateTensorGPU(effRes, params.TensorParallelSize, cpuProfile, common.ComponentLlmEngine+".resources"); err != nil {
-		return err
-	}
+	errs = append(errs, validateTensorGPU(effRes, params.TensorParallelSize, cpuProfile, gpuPath)...)
 	if params.WorkerCount != nil {
-		if err := validateTensorGPU(overlayResources(effRes, params.WorkerResources), params.TensorParallelSize, cpuProfile, common.ComponentLlmEngine+".parameters.workerResources"); err != nil {
-			return err
-		}
+		errs = append(errs, validateTensorGPU(overlayResources(effRes, params.WorkerResources), params.TensorParallelSize, cpuProfile, paramsPath.Child("workerResources"))...)
 	}
-	prefillWorkers := topo.PrefillWorkerCount != nil || topo.PrefillWorkerResources != nil
-	if prefillWorkers && !topo.EnablePrefill {
-		return fmt.Errorf("prefill worker fields require enablePrefill")
+	if (topo.PrefillWorkerCount != nil || topo.PrefillWorkerResources != nil) && !topo.EnablePrefill {
+		errs = append(errs, field.Invalid(topologyParametersPath.Child("enablePrefill"), false, "must be true for prefill workers"))
 	}
-	if err := validateWorkerGroup(
+	errs = append(errs, validateWorkerGroup(
 		topo.PrefillWorkerCount,
 		topo.PrefillPipelineParallelSize,
 		topo.PrefillWorkerResources != nil,
-		"topology.parameters.prefillWorkerCount",
-		"topology.parameters.prefillPipelineParallelSize",
-		"topology.parameters.prefillWorkerResources",
-	); err != nil {
-		return err
-	}
+		topologyParametersPath.Child("prefillWorkerCount"),
+		topologyParametersPath.Child("prefillPipelineParallelSize"),
+		topologyParametersPath.Child("prefillWorkerResources"),
+	)...)
 	if topo.PrefillWorkerCount != nil {
-		if err := validateTensorGPU(overlayResources(effRes, topo.PrefillWorkerResources), params.TensorParallelSize, cpuProfile, "topology.parameters.prefillWorkerResources"); err != nil {
-			return err
-		}
+		errs = append(errs, validateTensorGPU(overlayResources(effRes, topo.PrefillWorkerResources), params.TensorParallelSize, cpuProfile, topologyParametersPath.Child("prefillWorkerResources"))...)
 	}
-	return validateLoRAParams(c.Name(), params)
+	return append(errs, validateLoRAParams(in.Name, params, paramsPath)...)
 }
 
 // workloadScaling is the min/max/actuator triple shared by decode and prefill.
@@ -240,47 +225,47 @@ func resolvedActuator(actuator string) string {
 	return components.ScalingActuatorKEDA
 }
 
-func validateWorkloadScaling(s workloadScaling, minField, maxField, actuatorField string) error {
+func validateWorkloadScaling(s workloadScaling, minPath, maxPath, actuatorPath *field.Path) field.ErrorList {
 	if !s.enabled() {
 		return nil
 	}
-	if s.max == nil {
-		return fmt.Errorf("%s is required when autoscaling is enabled", maxField)
-	}
-	if *s.max < 1 {
-		return fmt.Errorf("%s must be at least 1", maxField)
+	var errs field.ErrorList
+	switch {
+	case s.max == nil:
+		errs = append(errs, field.Required(maxPath, "autoscaling needs a ceiling"))
+	case *s.max < 1:
+		errs = append(errs, field.Invalid(maxPath, *s.max, "must be at least 1"))
 	}
 	if s.min != nil {
-		if *s.min < 1 {
-			return fmt.Errorf("%s must be at least 1 (KServe WVA does not support scale-to-zero)", minField)
-		}
-		if *s.min > *s.max {
-			return fmt.Errorf("%s cannot exceed %s", minField, maxField)
+		switch {
+		case *s.min < 1:
+			errs = append(errs, field.Invalid(minPath, *s.min, "must be at least 1: KServe WVA does not scale to zero"))
+		case s.max != nil && *s.min > *s.max:
+			errs = append(errs, field.Invalid(minPath, *s.min, "must not exceed "+maxPath.String()))
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(s.actuator)) {
 	case "", components.ScalingActuatorHPA, components.ScalingActuatorKEDA:
 	default:
-		return fmt.Errorf("%s must be %s or %s", actuatorField, components.ScalingActuatorHPA, components.ScalingActuatorKEDA)
+		errs = append(errs, field.NotSupported(actuatorPath, s.actuator, []string{components.ScalingActuatorHPA, components.ScalingActuatorKEDA}))
 	}
-	return nil
+	return errs
 }
 
-func validateWorkerGroup(count, pipeline *int32, resourcesSet bool, countField, pipelineField, resourcesField string) error {
+func validateWorkerGroup(count, pipeline *int32, resourcesSet bool, countPath, pipelinePath, resourcesPath *field.Path) field.ErrorList {
 	if count == nil {
 		if resourcesSet {
-			return fmt.Errorf("%s requires %s", resourcesField, countField)
+			return field.ErrorList{field.Forbidden(resourcesPath, "requires "+countPath.String())}
 		}
 		return nil
 	}
-	if *count < 1 {
-		return fmt.Errorf("%s must be at least 1", countField)
-	}
-	if pipeline == nil {
-		return fmt.Errorf("%s is required when %s is set", pipelineField, countField)
-	}
-	if *pipeline != *count+1 {
-		return fmt.Errorf("%s must equal %s + 1 (got %d, want %d)", pipelineField, countField, *pipeline, *count+1)
+	switch {
+	case *count < 1:
+		return field.ErrorList{field.Invalid(countPath, *count, "must be at least 1")}
+	case pipeline == nil:
+		return field.ErrorList{field.Required(pipelinePath, "must equal "+countPath.String()+" + 1")}
+	case *pipeline != *count+1:
+		return field.ErrorList{field.Invalid(pipelinePath, *pipeline, fmt.Sprintf("must equal %s + 1 (%d)", countPath, *count+1))}
 	}
 	return nil
 }
@@ -317,7 +302,7 @@ func withGPUCount(res *corev1.ResourceRequirements, gpuCount *int32, cpuProfile 
 	return out
 }
 
-func validateTensorGPU(res *corev1.ResourceRequirements, tp *int32, cpuProfile bool, path string) error {
+func validateTensorGPU(res *corev1.ResourceRequirements, tp *int32, cpuProfile bool, path *field.Path) field.ErrorList {
 	if cpuProfile || tp == nil || *tp < 1 || res == nil {
 		return nil
 	}
@@ -326,7 +311,8 @@ func validateTensorGPU(res *corev1.ResourceRequirements, tp *int32, cpuProfile b
 		return nil
 	}
 	if q.Value() < int64(*tp) {
-		return fmt.Errorf("%s limits.nvidia.com/gpu (%d) must be >= tensorParallelSize (%d)", path, q.Value(), *tp)
+		return field.ErrorList{field.Invalid(path, field.OmitValueType{},
+			fmt.Sprintf("limits.nvidia.com/gpu (%d) must be >= tensorParallelSize (%d)", q.Value(), *tp))}
 	}
 	return nil
 }
@@ -399,109 +385,111 @@ func buildScalingSpec(s workloadScaling) *kservev1alpha2.ScalingSpec {
 }
 
 // validateLoRAParams checks llmEngine LoRA settings before sync.
-func validateLoRAParams(instanceName string, params components.VllmCustomSpec) error {
-	if err := validateLoRASlots(params); err != nil {
-		return err
+func validateLoRAParams(instanceName string, params components.VllmCustomSpec, path *field.Path) field.ErrorList {
+	if errs := validateLoRASlots(params, path); len(errs) > 0 {
+		return errs
 	}
 
 	adapters, err := resolvedLoRAAdapters(params)
 	if err != nil {
-		return err
+		return field.ErrorList{field.InternalError(path, err)}
 	}
 	if len(adapters) == 0 {
 		return nil
 	}
 
+	var errs field.ErrorList
+	adaptersPath := path.Child("lora", "adapters")
 	baseName := servedModelName(instanceName, params.ModelName)
-	seen := make(map[string]int, len(adapters))
-
+	seen := make(map[string]struct{}, len(adapters))
 	for i, adapter := range adapters {
-		path := fmt.Sprintf("%s.parameters.lora.adapters[%d]", common.ComponentLlmEngine, i)
+		namePath := adaptersPath.Index(i).Child("name")
 		name := strings.TrimSpace(adapter.Name)
-		if name == "" {
-			return fmt.Errorf("%s.name is required", path)
+		switch name {
+		case "":
+			errs = append(errs, field.Required(namePath, ""))
+		case ".", "..":
+			errs = append(errs, field.Invalid(namePath, adapter.Name, "is not a valid adapter name"))
+		case baseName:
+			errs = append(errs, field.Invalid(namePath, adapter.Name, fmt.Sprintf("must differ from the base served model name %q", baseName)))
+		default:
+			if _, ok := seen[name]; ok {
+				errs = append(errs, field.Duplicate(namePath, adapter.Name))
+			}
+			seen[name] = struct{}{}
 		}
-		if name == "." || name == ".." {
-			return fmt.Errorf("%s.name %q is not a valid adapter name", path, name)
-		}
-		if name == baseName {
-			return fmt.Errorf("%s.name %q must differ from the base served model name %q", path, name, baseName)
-		}
-		if prev, ok := seen[name]; ok {
-			return fmt.Errorf("%s.name %q duplicates adapters[%d].name", path, name, prev)
-		}
-		seen[name] = i
 
+		uriPath := adaptersPath.Index(i).Child("uri")
 		if strings.TrimSpace(adapter.URI) == "" {
-			return fmt.Errorf("%s.uri is required", path)
-		}
-		if _, err := apis.ParseURL(adapter.URI); err != nil {
-			return fmt.Errorf("invalid %s.uri %q: %w", path, adapter.URI, err)
+			errs = append(errs, field.Required(uriPath, ""))
+		} else if _, err := apis.ParseURL(adapter.URI); err != nil {
+			errs = append(errs, field.Invalid(uriPath, adapter.URI, err.Error()))
 		}
 	}
 
 	if params.LoRA != nil {
-		if params.LoRA.MaxRank != nil && *params.LoRA.MaxRank < 1 {
-			return fmt.Errorf("%s.parameters.lora.maxRank must be at least 1", common.ComponentLlmEngine)
-		}
-		if params.LoRA.MaxAdapters != nil && *params.LoRA.MaxAdapters < 1 {
-			return fmt.Errorf("%s.parameters.lora.maxAdapters must be at least 1", common.ComponentLlmEngine)
-		}
-		if params.LoRA.MaxCpuAdapters != nil && *params.LoRA.MaxCpuAdapters < 1 {
-			return fmt.Errorf("%s.parameters.lora.maxCpuAdapters must be at least 1", common.ComponentLlmEngine)
+		for _, limit := range []struct {
+			name  string
+			value *int32
+		}{
+			{"maxRank", params.LoRA.MaxRank},
+			{"maxAdapters", params.LoRA.MaxAdapters},
+			{"maxCpuAdapters", params.LoRA.MaxCpuAdapters},
+		} {
+			if limit.value != nil && *limit.value < 1 {
+				errs = append(errs, field.Invalid(path.Child("lora", limit.name), *limit.value, "must be at least 1"))
+			}
 		}
 	}
 
 	if params.DisableStorageInitializer != nil && *params.DisableStorageInitializer {
 		for i, adapter := range adapters {
-			schema, _, ok := strings.Cut(adapter.URI, "://")
-			if !ok {
-				continue
-			}
-			switch schema + "://" {
-			case "hf://", "s3://":
-				return fmt.Errorf("%s.parameters.lora.adapters[%d] uses %s which requires the storage initializer; set disableStorageInitializer to false", common.ComponentLlmEngine, i, schema+"://")
+			scheme, _, ok := strings.Cut(adapter.URI, "://")
+			if ok && (scheme == "hf" || scheme == "s3") {
+				errs = append(errs, field.Invalid(adaptersPath.Index(i).Child("uri"), adapter.URI,
+					"needs the storage initializer; set disableStorageInitializer to false"))
 			}
 		}
 	}
-	return nil
+	return errs
 }
 
-func validateLoRASlots(params components.VllmCustomSpec) error {
+func validateLoRASlots(params components.VllmCustomSpec, path *field.Path) field.ErrorList {
 	switch strings.TrimSpace(params.LoraDeployment) {
 	case "", components.LoraDeploymentDisabled:
 		return nil
 	case components.LoraDeploymentEnabled:
-		// continue
 	default:
-		return fmt.Errorf("%s.parameters.loraDeployment must be %q or %q", common.ComponentLlmEngine, components.LoraDeploymentDisabled, components.LoraDeploymentEnabled)
+		return field.ErrorList{field.NotSupported(path.Child("loraDeployment"), params.LoraDeployment,
+			[]string{components.LoraDeploymentDisabled, components.LoraDeploymentEnabled})}
 	}
-	slots := loraSlotNames(params)
-	if len(slots) == 0 {
-		return fmt.Errorf("%s.parameters.loraDeployment enabled requires at least one adapter slot", common.ComponentLlmEngine)
+	if len(loraSlotNames(params)) == 0 {
+		return field.ErrorList{field.Required(path.Child("loraSlot1"), "loraDeployment enabled needs at least one adapter slot")}
 	}
-	seen := make(map[string]string, len(slots))
-	for _, item := range []struct {
-		field string
+	var errs field.ErrorList
+	seen := make(map[string]string, 3)
+	for _, slot := range []struct {
+		param string
 		name  string
 	}{
 		{"loraSlot1", params.LoraSlot1},
 		{"loraSlot2", params.LoraSlot2},
 		{"loraSlot3", params.LoraSlot3},
 	} {
-		name := strings.TrimSpace(item.name)
+		name := strings.TrimSpace(slot.name)
 		if name == "" {
 			continue
 		}
 		if prev, ok := seen[name]; ok {
-			return fmt.Errorf("%s.parameters.%s and %s both select adapter %q", common.ComponentLlmEngine, prev, item.field, name)
+			errs = append(errs, field.Invalid(path.Child(slot.param), slot.name, "selects the same adapter as "+prev))
+			continue
 		}
-		seen[name] = item.field
+		seen[name] = slot.param
 		if _, ok := common.LookupLoRAAdapter(name); !ok {
-			return fmt.Errorf("%s.parameters.%s references unknown adapter %q (add it to chart loraAdapters)", common.ComponentLlmEngine, item.field, name)
+			errs = append(errs, field.Invalid(path.Child(slot.param), slot.name, "is not in the chart's loraAdapters catalog"))
 		}
 	}
-	return nil
+	return errs
 }
 
 func loraSlotNames(params components.VllmCustomSpec) []string {
@@ -571,7 +559,7 @@ func buildModelLoRA(params components.VllmCustomSpec) (*kservev1alpha2.LoRASpec,
 func parseLLMConfigSpec(raw string) (kservev1alpha2.LLMInferenceServiceSpec, error) {
 	var spec kservev1alpha2.LLMInferenceServiceSpec
 	if err := yaml.Unmarshal([]byte(raw), &spec); err != nil {
-		return spec, fmt.Errorf("invalid %s.parameters.config: %w", common.ComponentLlmEngine, err)
+		return spec, fmt.Errorf("parsing YAML: %w", err)
 	}
 	return spec, nil
 }
@@ -833,7 +821,7 @@ func buildLLMInferenceService(c *controller.Context) (*kservev1alpha2.LLMInferen
 		if strings.TrimSpace(params.Config) != "" {
 			parsed, err := parseLLMConfigSpec(params.Config)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%s.parameters.config: %w", common.ComponentLlmEngine, err)
 			}
 			inline = &parsed
 		}
@@ -1003,7 +991,7 @@ func ensureLLMConfig(c *controller.Context) error {
 
 	spec, err := parseLLMConfigSpec(params.Config)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s.parameters.config: %w", common.ComponentLlmEngine, err)
 	}
 
 	cfg := &kservev1alpha2.LLMInferenceServiceConfig{

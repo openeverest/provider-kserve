@@ -3,4 +3,6 @@ kind: Instance
 metadata:
   name: test-predictor-identity-reserved
 status:
-  phase: Failed
+  (conditions[?type == 'Ready']):
+    - status: "False"
+      reason: ValidationFailed

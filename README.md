@@ -235,8 +235,8 @@ Source of truth: [definition/versions.yaml](definition/versions.yaml).
 - **Chart values:** [charts/provider-kserve/values.yaml](charts/provider-kserve/values.yaml)
 - **Instance parameters:** per-component and per-topology `parameters` schemas, defined under
   [definition/](definition/) and published on the `Provider` resource
-  (`kubectl get provider provider-kserve -o yaml`). The API server and the UI validate user
-  input against these schemas.
+  (`kubectl get provider provider-kserve -o yaml`). The provider rejects an Instance that does
+  not match them, and the UI checks the form against them as you type.
 
 ### `llmEngine` (vllm) parameters
 
@@ -909,8 +909,10 @@ The provider rejects malformed YAML, duplicate keys, and multiple documents.
 It validates the merged resource with a strict server-side dry-run apply before
 Sync. The installed CRD and KServe webhooks reject invalid fields and combinations.
 
-Validation failures mark the Instance `Failed`; provider logs include
-`predictor.parameters.config` and the error details. The dry run persists nothing.
+Malformed YAML sets the Instance's `Ready` condition to `False` with reason
+`ValidationFailed`, and a rejected dry run with reason `InvalidReference`; the message
+names `spec.components[predictor].parameters.config` and the error details. The dry run
+persists nothing.
 Removing `config` removes its provider-owned fields on the next successful reconcile.
 
 Unlike [LLM inline config](#advanced-customization-inline-config), predictor config

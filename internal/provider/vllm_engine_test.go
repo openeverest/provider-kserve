@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -89,7 +90,7 @@ func TestValidateEngine(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := validateEngine(tc.e)
+			err := validateEngine(tc.e, field.NewPath("engine")).ToAggregate()
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("validateEngine() = %v, want nil", err)
@@ -107,7 +108,7 @@ func TestValidateLLMRejectsInvalidEngine(t *testing.T) {
 	t.Parallel()
 	err := validateLLM(llmContext(t, nil, components.VllmCustomSpec{
 		Engine: &components.VllmEngineSpec{Dtype: "int4"},
-	}, llm.LlmTopologyParameters{}))
+	}, llm.LlmTopologyParameters{}).Instance()).ToAggregate()
 	if err == nil || !strings.Contains(err.Error(), "engine.dtype") {
 		t.Fatalf("validateLLM() = %v, want engine.dtype error", err)
 	}

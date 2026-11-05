@@ -33,4 +33,6 @@ spec:
               metadata:
                 name: test-predictor-zero-min
               status:
-                phase: Failed
+                (conditions[?type == 'Ready']):
+                  - status: "False"
+                    reason: ValidationFailed
