@@ -208,11 +208,11 @@ func TestValidatePredictorMetadata(t *testing.T) {
 		wantErr     string
 	}{
 		{name: "valid", labels: map[string]string{"team": "ml"}, annotations: map[string]string{"example.com/owner": "ml"}},
-		{name: "provider label", labels: map[string]string{controller.InstanceLabel: "other"}, wantErr: `"core.openeverest.io/instance" is managed by the provider`},
-		{name: "ownership label", labels: map[string]string{"app.kubernetes.io/managed-by": "me"}, wantErr: `"app.kubernetes.io/managed-by" is managed by the provider`},
-		{name: "invalid label value", labels: map[string]string{"team": "has spaces"}, wantErr: `invalid label "team"`},
-		{name: "deployment mode annotation", annotations: map[string]string{common.DeploymentModeAnnotation: "Serverless"}, wantErr: "is managed by the provider"},
-		{name: "invalid annotation key", annotations: map[string]string{"bad key": "x"}, wantErr: `invalid key "bad key"`},
+		{name: "provider label", labels: map[string]string{controller.InstanceLabel: "other"}, wantErr: "labels[core.openeverest.io/instance]: Forbidden: is managed by the provider"},
+		{name: "ownership label", labels: map[string]string{"app.kubernetes.io/managed-by": "me"}, wantErr: "labels[app.kubernetes.io/managed-by]: Forbidden: is managed by the provider"},
+		{name: "invalid label value", labels: map[string]string{"team": "has spaces"}, wantErr: `labels[team]: Invalid value: "has spaces"`},
+		{name: "deployment mode annotation", annotations: map[string]string{common.DeploymentModeAnnotation: "Serverless"}, wantErr: "annotations[serving.kserve.io/deploymentMode]: Forbidden: is managed by the provider"},
+		{name: "invalid annotation key", annotations: map[string]string{"bad key": "x"}, wantErr: `annotations[bad key]: Invalid value: "bad key"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -222,7 +222,7 @@ func TestValidatePredictorMetadata(t *testing.T) {
 					Labels: tc.labels, Annotations: tc.annotations,
 				}),
 			})
-			err := validatePredictor(c)
+			err := validatePredictor(c.Instance()).ToAggregate()
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Fatalf("unexpected error: %v", err)
@@ -253,7 +253,7 @@ func TestValidatePredictorExternalAccess(t *testing.T) {
 				Parameters: rawJSON(t, components.ModelServerCustomSpec{ModelFormat: "sklearn", StorageURI: "gs://bucket/iris"}),
 			})
 			c.Instance().Spec.Topology.Parameters = rawJSON(t, tc.topo)
-			if err := validatePredictor(c); (err != nil) != tc.wantErr {
+			if err := validatePredictor(c.Instance()).ToAggregate(); (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, wantErr %t", err, tc.wantErr)
 			}
 		})
@@ -361,13 +361,13 @@ func TestValidatePredictorStorageContainer(t *testing.T) {
 			name:             "invalid name",
 			storageContainer: "S3_Init",
 			storageURI:       "s3://bucket/model",
-			wantErr:          `predictor.parameters.storageContainer: invalid name "S3_Init"`,
+			wantErr:          `spec.components[predictor].parameters.storageContainer: Invalid value: "S3_Init"`,
 		},
 		{
 			name:             "not found",
 			storageContainer: "missing",
 			storageURI:       "s3://bucket/model",
-			wantErr:          `predictor.parameters.storageContainer: ClusterStorageContainer "missing" not found`,
+			wantErr:          `spec.components[predictor].parameters.storageContainer: Not found: "missing"`,
 		},
 		{
 			name:             "disabled",
@@ -376,21 +376,21 @@ func TestValidatePredictorStorageContainer(t *testing.T) {
 			objs: []client.Object{storageContainer("s3-init", func(o map[string]any) {
 				o["disabled"] = true
 			})},
-			wantErr: `predictor.parameters.storageContainer: ClusterStorageContainer "s3-init" is disabled`,
+			wantErr: `spec.components[predictor].parameters.storageContainer: Invalid value: "s3-init": the ClusterStorageContainer is disabled`,
 		},
 		{
 			name:             "local model download job",
 			storageContainer: "s3-init",
 			storageURI:       "s3://bucket/model",
 			objs:             []client.Object{storageContainer("s3-init", setWorkloadType("localModelDownloadJob"))},
-			wantErr:          `predictor.parameters.storageContainer: ClusterStorageContainer "s3-init" has workloadType "localModelDownloadJob", want "initContainer"`,
+			wantErr:          `spec.components[predictor].parameters.storageContainer: Invalid value: "s3-init": the ClusterStorageContainer has workloadType "localModelDownloadJob", want "initContainer"`,
 		},
 		{
 			name:             "unsupported URI",
 			storageContainer: "s3-init",
 			storageURI:       "gs://bucket/model",
 			objs:             []client.Object{storageContainer("s3-init", nil)},
-			wantErr:          `predictor.parameters.storageContainer: ClusterStorageContainer "s3-init" does not support storageURI "gs://bucket/model"`,
+			wantErr:          `spec.components[predictor].parameters.storageContainer: Invalid value: "s3-init": the ClusterStorageContainer does not support storageURI "gs://bucket/model"`,
 		},
 	}
 	for _, tc := range cases {
@@ -404,7 +404,15 @@ func TestValidatePredictorStorageContainer(t *testing.T) {
 				}),
 			})
 
-			err := validatePredictor(c)
+			errs := validatePredictor(c.Instance())
+			if len(errs) == 0 {
+				refErrs, err := (&Provider{}).ValidateReferences(c)
+				if err != nil {
+					t.Fatal(err)
+				}
+				errs = refErrs
+			}
+			err := errs.ToAggregate()
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Fatalf("unexpected error: %v", err)
@@ -568,7 +576,7 @@ func TestValidatePredictorTask(t *testing.T) {
 		c := predictorContext(t, nil, corev1alpha1.ComponentSpec{
 			Parameters: rawJSON(t, components.ModelServerCustomSpec{ModelFormat: format, StorageURI: "hf://org/model", Task: "text_embedding"}),
 		})
-		if err := validatePredictor(c); (err != nil) != wantErr {
+		if err := validatePredictor(c.Instance()).ToAggregate(); (err != nil) != wantErr {
 			t.Fatalf("%s: err = %v, wantErr %t", format, err, wantErr)
 		}
 	}
@@ -644,7 +652,7 @@ func TestValidatePredictorInstanceName(t *testing.T) {
 			Parameters: rawJSON(t, components.ModelServerCustomSpec{ModelFormat: "sklearn", StorageURI: "gs://bucket/iris"}),
 		})
 		c.Instance().Name = name
-		if err := validatePredictor(c); (err != nil) != wantErr {
+		if err := validatePredictor(c.Instance()).ToAggregate(); (err != nil) != wantErr {
 			t.Fatalf("%s: err = %v, wantErr %t", name, err, wantErr)
 		}
 	}
@@ -655,7 +663,7 @@ func TestBuildInferenceServiceFromCatalog(t *testing.T) {
 	c := predictorContext(t, nil, corev1alpha1.ComponentSpec{
 		Parameters: rawJSON(t, components.ModelServerCustomSpec{Model: "minilm"}),
 	})
-	if err := validatePredictor(c); err != nil {
+	if err := validatePredictor(c.Instance()).ToAggregate(); err != nil {
 		t.Fatal(err)
 	}
 	isvc, err := buildInferenceService(c)
@@ -703,7 +711,7 @@ func TestValidatePredictorGPUCount(t *testing.T) {
 		c := predictorContext(t, nil, corev1alpha1.ComponentSpec{
 			Parameters: rawJSON(t, components.ModelServerCustomSpec{ModelFormat: "sklearn", StorageURI: "gs://bucket/iris", GpuCount: ptr.To(count)}),
 		})
-		if err := validatePredictor(c); (err != nil) != wantErr {
+		if err := validatePredictor(c.Instance()).ToAggregate(); (err != nil) != wantErr {
 			t.Fatalf("%d: err = %v, wantErr %t", count, err, wantErr)
 		}
 	}
@@ -728,7 +736,7 @@ func TestValidatePredictorReplicaFloor(t *testing.T) {
 				Replicas:   tc.replicas,
 				Parameters: rawJSON(t, components.ModelServerCustomSpec{ModelFormat: "sklearn", StorageURI: "gs://bucket/iris", MinReplicas: tc.minReplicas}),
 			})
-			if err := validatePredictor(c); (err != nil) != tc.wantErr {
+			if err := validatePredictor(c.Instance()).ToAggregate(); (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, wantErr %t", err, tc.wantErr)
 			}
 		})

@@ -368,7 +368,7 @@ ui:
       components:
         podSchedulingPolicy:
           uiType: group
-          groupType: toggleable
+          groupType: bordered
           label: Pod scheduling policy
           components:
             policy:

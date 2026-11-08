@@ -327,4 +327,4 @@ Anthropic-style clients can send the key in `x-api-key` instead.
 | Instance stays `Provisioning` with "no Gateway controller has accepted it yet" | provider image older than this guide; upgrade the provider |
 | Chart fails: "aiGateway.auth requires HTTPS" | finish step 5, or set `aiGateway.auth.allowInsecureHTTP=true` for local development |
 | 500 (gateway log `response_payload_too_large`) or 413 (`request_payload_too_large`) on large batches or prompts | raise `aiGateway.bufferLimit` (default `50Mi`) |
-| Instance `Failed`: model name already served | another Instance on the Gateway uses the same `modelName`; pick a unique one |
+| Instance not Ready (`InvalidReference`): model name already served | another Instance on the Gateway uses the same `modelName`; pick a unique one |

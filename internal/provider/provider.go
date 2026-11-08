@@ -61,21 +61,6 @@ func unstructuredObject(gvk schema.GroupVersionKind) *unstructured.Unstructured 
 	return obj
 }
 
-// Validate checks if the Instance spec is valid.
-func (p *Provider) Validate(c *controller.Context) error {
-	l := log.FromContext(c.Context())
-	l.Info("Validating instance", "name", c.Name())
-
-	switch c.Instance().GetTopologyType() {
-	case common.TopologyLLM:
-		return validateLLM(c)
-	case common.TopologyPredictor:
-		return validatePredictor(c)
-	default:
-		return fmt.Errorf("unsupported topology %q", c.Instance().GetTopologyType())
-	}
-}
-
 // Sync ensures the KServe resource for the Instance exists and is up to date.
 func (p *Provider) Sync(c *controller.Context) error {
 	l := log.FromContext(c.Context())

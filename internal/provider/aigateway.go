@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	knativekmeta "knative.dev/pkg/kmeta"
 
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
@@ -113,20 +114,28 @@ func cleanupAIGateway(c *controller.Context) error {
 	return deleteAIGatewayObject(c, backendTrafficPolicyGVK, "-token-limit")
 }
 
-// validateAIGatewayAccess enforces the invariants API keys rely on: keys only
-// travel over HTTPS, and a model name maps to exactly one route because the
-// Gateway authorizes keys by model name. fix tells the user how to pick
-// another model name.
-func validateAIGatewayAccess(c *controller.Context, modelName, fix string) error {
-	if common.AIGatewayAuthEnabled() && common.AIGatewayScheme() != "https" && !common.AIGatewayAuthAllowInsecureHTTP() {
-		return fmt.Errorf("API keys for the Envoy AI Gateway require HTTPS: enable aiGateway.tls in the provider chart " +
-			"(or set aiGateway.auth.allowInsecureHTTP for local development)")
+// validateAIGatewayChart checks the provider chart can serve externalAccess
+// EnvoyAIGateway. API keys only travel over HTTPS.
+func validateAIGatewayChart(path *field.Path, externalAccess string) field.ErrorList {
+	if !common.AIGatewayEnabled() {
+		return field.ErrorList{field.Invalid(path, externalAccess, "requires aiGateway.enabled in the provider chart")}
 	}
+	if common.AIGatewayAuthEnabled() && common.AIGatewayScheme() != "https" && !common.AIGatewayAuthAllowInsecureHTTP() {
+		return field.ErrorList{field.Invalid(path, externalAccess, "API keys for the Envoy AI Gateway require HTTPS: enable aiGateway.tls in the provider chart "+
+			"(or set aiGateway.auth.allowInsecureHTTP for local development)")}
+	}
+	return nil
+}
 
+// aiGatewayRouteServing returns the namespace/name of another route on the
+// provider's Gateway that serves modelName, or "" when there is none. A model
+// name maps to exactly one route because the Gateway authorizes keys by model
+// name.
+func aiGatewayRouteServing(c *controller.Context, modelName string) (string, error) {
 	routes := &unstructured.UnstructuredList{}
 	routes.SetGroupVersionKind(aiGatewayRouteGVK.GroupVersion().WithKind(aiGatewayRouteGVK.Kind + "List"))
 	if err := c.Client().List(c.Context(), routes); err != nil {
-		return fmt.Errorf("listing ai gateway routes: %w", err)
+		return "", fmt.Errorf("listing ai gateway routes: %w", err)
 	}
 	ownRoute := aiGatewayRouteName(c.Name())
 	for i := range routes.Items {
@@ -138,11 +147,10 @@ func validateAIGatewayAccess(c *controller.Context, modelName, fix string) error
 			continue
 		}
 		if slices.Contains(aiGatewayRouteModels(route), modelName) {
-			return fmt.Errorf("model name %q is already served through the Envoy AI Gateway by %s/%s; %s",
-				modelName, route.GetNamespace(), route.GetName(), fix)
+			return route.GetNamespace() + "/" + route.GetName(), nil
 		}
 	}
-	return nil
+	return "", nil
 }
 
 func deleteAIGatewayObject(c *controller.Context, gvk schema.GroupVersionKind, suffix string) error {

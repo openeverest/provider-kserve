@@ -23,19 +23,8 @@ spec:
 
     - name: reject-runtime-fields
       try:
-        - apply:
-            file: 10-invalid.yaml
-        - assert:
-            resource:
-              apiVersion: core.openeverest.io/v1alpha1
-              kind: Instance
-              metadata:
-                name: test-predictor-custom-invalid
-              status:
-                phase: Failed
-        - error:
-            resource:
-              apiVersion: serving.kserve.io/v1beta1
-              kind: InferenceService
-              metadata:
-                name: test-predictor-custom-invalid
+        - script:
+            content: kubectl apply -n $NAMESPACE -f 10-invalid.yaml
+            check:
+              ($error != null): true
+              (contains($stderr, 'spec.components[predictor].parameters.modelFormat')): true

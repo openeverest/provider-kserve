@@ -159,9 +159,9 @@ func TestValidateCustomContainer(t *testing.T) {
 				ServedModelName: "chat", ImagePullSecret: "creds", StorageURI: "s3://bucket/model",
 			},
 		},
-		{name: "model format", params: components.ModelServerCustomSpec{Image: image, ModelFormat: "sklearn"}, wantErr: "parameters.modelFormat selects a KServe serving runtime"},
-		{name: "runtime", params: components.ModelServerCustomSpec{Image: image, Runtime: "kserve-sklearnserver"}, wantErr: "parameters.runtime selects"},
-		{name: "task", params: components.ModelServerCustomSpec{Image: image, Task: "text_embedding"}, wantErr: "parameters.task selects"},
+		{name: "model format", params: components.ModelServerCustomSpec{Image: image, ModelFormat: "sklearn"}, wantErr: "parameters.modelFormat: Forbidden: selects a KServe serving runtime"},
+		{name: "runtime", params: components.ModelServerCustomSpec{Image: image, Runtime: "kserve-sklearnserver"}, wantErr: "parameters.runtime: Forbidden: selects"},
+		{name: "task", params: components.ModelServerCustomSpec{Image: image, Task: "text_embedding"}, wantErr: "parameters.task: Forbidden: selects"},
 		{name: "port out of range", params: components.ModelServerCustomSpec{Image: image, Port: ptr.To(int32(70000))}, wantErr: "between 1 and 65535"},
 		{name: "relative health path", params: components.ModelServerCustomSpec{Image: image, HealthPath: "health"}, wantErr: "must start with /"},
 		{name: "invalid pull secret", params: components.ModelServerCustomSpec{Image: image, ImagePullSecret: "Bad_Name"}, wantErr: "parameters.imagePullSecret"},
@@ -169,30 +169,30 @@ func TestValidateCustomContainer(t *testing.T) {
 		{
 			name:    "container field without image",
 			params:  components.ModelServerCustomSpec{ModelFormat: "sklearn", StorageURI: "gs://bucket/iris", HealthPath: "/health"},
-			wantErr: "parameters.healthPath requires image",
+			wantErr: "parameters.healthPath: Forbidden: requires image",
 		},
 		{
 			name:    "openAICompatible without image",
 			params:  components.ModelServerCustomSpec{ModelFormat: "sklearn", StorageURI: "gs://bucket/iris", OpenAICompatible: true},
-			wantErr: "parameters.openAICompatible requires image",
+			wantErr: "parameters.openAICompatible: Forbidden: requires image",
 		},
 		{
 			name:    "apiSchema without image",
 			params:  components.ModelServerCustomSpec{ModelFormat: "sklearn", StorageURI: "gs://bucket/iris", APISchema: "TypeSafe"},
-			wantErr: "parameters.apiSchema requires image",
+			wantErr: "parameters.apiSchema: Forbidden: requires image",
 		},
 		{
 			name:    "backendAPIKeySecret without image",
 			params:  components.ModelServerCustomSpec{ModelFormat: "sklearn", StorageURI: "gs://bucket/iris", BackendAPIKeySecret: "key"},
-			wantErr: "parameters.backendAPIKeySecret requires image",
+			wantErr: "parameters.backendAPIKeySecret: Forbidden: requires image",
 		},
 		{name: "apiSchema TypeSafe", params: components.ModelServerCustomSpec{Image: image, APISchema: "TypeSafe"}},
 		{name: "apiSchema OpenAI with openAICompatible", params: components.ModelServerCustomSpec{Image: image, APISchema: "OpenAI", OpenAICompatible: true}},
-		{name: "unknown apiSchema", params: components.ModelServerCustomSpec{Image: image, APISchema: "Anthropic"}, wantErr: "apiSchema must be OpenAI or TypeSafe"},
+		{name: "unknown apiSchema", params: components.ModelServerCustomSpec{Image: image, APISchema: "Anthropic"}, wantErr: `parameters.apiSchema: Unsupported value: "Anthropic"`},
 		{
 			name:    "TypeSafe with openAICompatible",
 			params:  components.ModelServerCustomSpec{Image: image, APISchema: "TypeSafe", OpenAICompatible: true},
-			wantErr: "openAICompatible conflicts with apiSchema",
+			wantErr: "parameters.openAICompatible: Invalid value: true: conflicts with apiSchema",
 		},
 		{name: "invalid backend key secret", params: components.ModelServerCustomSpec{Image: image, BackendAPIKeySecret: "Bad_Name"}, wantErr: "parameters.backendAPIKeySecret:"},
 		{name: "backend key secret without the gateway", params: components.ModelServerCustomSpec{Image: image, BackendAPIKeySecret: "key"}, wantErr: "requires topology.parameters.externalAccess EnvoyAIGateway"},
@@ -200,7 +200,7 @@ func TestValidateCustomContainer(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := predictorContext(t, nil, corev1alpha1.ComponentSpec{Parameters: rawJSON(t, tc.params)})
-			err := validatePredictor(c)
+			err := validatePredictor(c.Instance()).ToAggregate()
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatal(err)

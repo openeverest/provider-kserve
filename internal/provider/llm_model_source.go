@@ -7,11 +7,11 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
 
 	"github.com/openeverest/provider-kserve/definition/components"
-	"github.com/openeverest/provider-kserve/internal/common"
 )
 
 const (
@@ -27,27 +27,29 @@ var llmModelSchemes = []string{"hf", "s3", "pvc", ociScheme, ociNativeScheme}
 
 // validateLLMModelSource checks that KServe can make the model available to
 // vLLM and that a private-registry pull secret is a valid name.
-func validateLLMModelSource(params components.VllmCustomSpec) error {
-	field := common.ComponentLlmEngine + ".parameters."
+func validateLLMModelSource(params components.VllmCustomSpec, path *field.Path) field.ErrorList {
+	var errs field.ErrorList
 	scheme, _, _ := strings.Cut(params.ModelURI, "://")
 	disabled := params.DisableStorageInitializer != nil && *params.DisableStorageInitializer
 	switch {
 	case disabled && (scheme == ociScheme || scheme == ociNativeScheme):
 		// KServe skips model attachment entirely when the storage initializer is
 		// disabled, so the image would never be mounted.
-		return fmt.Errorf("%sdisableStorageInitializer must be false for %s:// models: KServe mounts the image in that step", field, scheme)
+		errs = append(errs, field.Invalid(path.Child("disableStorageInitializer"), true,
+			fmt.Sprintf("must be false for %s:// models: KServe mounts the image in that step", scheme)))
 	case disabled:
 		// The model is expected at /mnt/models already; the URI is informational.
 	case !slices.Contains(llmModelSchemes, scheme):
-		return fmt.Errorf("%smodelURI %q: scheme %q is not supported; use one of %s", field, params.ModelURI, scheme, strings.Join(schemeList(), ", "))
+		errs = append(errs, field.Invalid(path.Child("modelURI"), params.ModelURI,
+			fmt.Sprintf("scheme %q is not supported; use one of %s", scheme, strings.Join(schemeList(), ", "))))
 	}
 
 	if params.ImagePullSecret != "" {
-		if errs := validation.IsDNS1123Subdomain(params.ImagePullSecret); len(errs) > 0 {
-			return fmt.Errorf("%simagePullSecret %q: %s", field, params.ImagePullSecret, strings.Join(errs, "; "))
+		if msgs := validation.IsDNS1123Subdomain(params.ImagePullSecret); len(msgs) > 0 {
+			errs = append(errs, field.Invalid(path.Child("imagePullSecret"), params.ImagePullSecret, strings.Join(msgs, "; ")))
 		}
 	}
-	return nil
+	return errs
 }
 
 func schemeList() []string {

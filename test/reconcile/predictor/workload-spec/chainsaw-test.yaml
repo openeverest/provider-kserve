@@ -7,8 +7,8 @@ spec:
     env, args and spec.components.predictor.schedulingPolicy reach the
     InferenceService predictor, and KServe carries them onto the predictor
     Deployment's pod template. A topology spread constraint without a selector
-    gets the predictor pod labels. minReplicas 0 fails validation: KServe
-    Standard mode does not scale to zero.
+    gets the predictor pod labels. minReplicas 0 is rejected at admission:
+    KServe Standard mode does not scale to zero.
   catch:
     - script:
         content: kubectl -n $NAMESPACE get instance,inferenceservice,deployment -o yaml
@@ -24,13 +24,8 @@ spec:
 
     - name: zero-min-replicas
       try:
-        - apply:
-            file: 10-instance-zero-min.yaml
-        - assert:
-            resource:
-              apiVersion: core.openeverest.io/v1alpha1
-              kind: Instance
-              metadata:
-                name: test-predictor-zero-min
-              status:
-                phase: Failed
+        - script:
+            content: kubectl apply -n $NAMESPACE -f 10-instance-zero-min.yaml
+            check:
+              ($error != null): true
+              (contains($stderr, 'spec.components[predictor].parameters.minReplicas')): true

@@ -7,8 +7,10 @@ import (
 	"io"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -114,22 +116,30 @@ func indexByName(items []any, used []bool, name any) int {
 
 // validatePredictorConfig runs the same apply as Sync without persisting it.
 // The installed CRD and admission webhooks validate fields absent from our Go types.
-func validatePredictorConfig(c *controller.Context) error {
+func validatePredictorConfig(c *controller.Context, path *field.Path) (field.ErrorList, error) {
 	isvc, err := buildInferenceService(c)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	// API validation also runs before the Instance has been persisted.
+	// The Instance has no UID yet when it is validated before it is created.
 	if c.Instance().UID != "" {
 		if err := controllerutil.SetControllerReference(c.Instance(), isvc, c.Client().Scheme()); err != nil {
-			return fmt.Errorf("setting InferenceService owner: %w", err)
+			return nil, fmt.Errorf("setting InferenceService owner: %w", err)
 		}
 	}
 	//nolint:staticcheck // KServe's unstructured resources lack apply configurations.
-	if err := c.Client().Patch(c.Context(), isvc, client.Apply,
+	err = c.Client().Patch(c.Context(), isvc, client.Apply,
 		client.FieldOwner(common.FieldOwner), client.ForceOwnership,
-		client.DryRunAll, client.FieldValidation(metav1.FieldValidationStrict)); err != nil {
-		return fmt.Errorf("%s.parameters.config: validating merged InferenceService: %w", common.ComponentPredictor, err)
+		client.DryRunAll, client.FieldValidation(metav1.FieldValidationStrict))
+	var status apierrors.APIStatus
+	switch {
+	case err == nil:
+		return nil, nil
+	// Webhook denials come back as Forbidden, and fields the CRD does not declare as a Status without a reason.
+	case apierrors.IsInvalid(err), apierrors.IsBadRequest(err), apierrors.IsForbidden(err),
+		errors.As(err, &status) && status.Status().Reason == metav1.StatusReasonUnknown:
+		return field.ErrorList{field.Invalid(path, field.OmitValueType{}, "the merged InferenceService is rejected: "+err.Error())}, nil
+	default:
+		return nil, fmt.Errorf("validating the merged InferenceService: %w", err)
 	}
-	return nil
 }

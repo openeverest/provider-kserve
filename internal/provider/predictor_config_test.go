@@ -100,7 +100,7 @@ func TestBuildInferenceServiceInvalidConfig(t *testing.T) {
 			c := predictorContext(t, nil, corev1alpha1.ComponentSpec{Parameters: rawJSON(t, components.ModelServerCustomSpec{
 				ModelFormat: "sklearn", StorageURI: "gs://bucket/iris", Config: tc.raw,
 			})})
-			if err := validatePredictor(c); err == nil || !strings.Contains(err.Error(), "predictor.parameters.config") {
+			if err := validatePredictor(c.Instance()).ToAggregate(); err == nil || !strings.Contains(err.Error(), "[predictor].parameters.config") {
 				t.Fatalf("expected config validation error, got %v", err)
 			}
 		})

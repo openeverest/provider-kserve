@@ -1,6 +1,4 @@
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
-  name: test-predictor-catalog-unknown
-status:
-  phase: Failed
+  name: test-admission

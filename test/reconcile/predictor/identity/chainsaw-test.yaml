@@ -6,7 +6,7 @@ spec:
   description: |
     serviceAccountName, labels, annotations and both security contexts reach
     the InferenceService, and KServe carries them onto the predictor pod
-    template. A label the provider manages is rejected by validation.
+    template. A label the provider manages is rejected at admission.
   catch:
     - script:
         content: kubectl -n $NAMESPACE get instance,inferenceservice,deployment -o yaml
@@ -24,9 +24,8 @@ spec:
 
     - name: reserved-label
       try:
-        - apply:
-            file: 10-instance-reserved-label.yaml
-        - assert:
-            file: 10-assert-failed.yaml
-        - error:
-            file: 10-errors.yaml
+        - script:
+            content: kubectl apply -n $NAMESPACE -f 10-instance-reserved-label.yaml
+            check:
+              ($error != null): true
+              (contains($stderr, 'spec.components[predictor].parameters.labels[core.openeverest.io/instance]')): true

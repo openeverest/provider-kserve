@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
@@ -30,22 +31,22 @@ var vllmDtypes = []string{"auto", "half", "float16", "bfloat16", "float", "float
 var vllmFlagValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 // validateEngine checks the first-class vLLM engine settings.
-func validateEngine(e *components.VllmEngineSpec) error {
+func validateEngine(e *components.VllmEngineSpec, path *field.Path) field.ErrorList {
 	if e == nil {
 		return nil
 	}
-	field := func(name string) string { return common.ComponentLlmEngine + ".parameters.engine." + name }
+	var errs field.ErrorList
 	if e.MaxModelLen != nil && *e.MaxModelLen < 1 {
-		return fmt.Errorf("%s must be at least 1", field("maxModelLen"))
+		errs = append(errs, field.Invalid(path.Child("maxModelLen"), *e.MaxModelLen, "must be at least 1"))
 	}
 	if e.MaxNumSeqs != nil && *e.MaxNumSeqs < 1 {
-		return fmt.Errorf("%s must be at least 1", field("maxNumSeqs"))
+		errs = append(errs, field.Invalid(path.Child("maxNumSeqs"), *e.MaxNumSeqs, "must be at least 1"))
 	}
 	if u := e.GpuMemoryUtilization; u != nil && (*u <= 0 || *u > 1) {
-		return fmt.Errorf("%s must be greater than 0 and at most 1", field("gpuMemoryUtilization"))
+		errs = append(errs, field.Invalid(path.Child("gpuMemoryUtilization"), *u, "must be greater than 0 and at most 1"))
 	}
 	if e.Dtype != "" && !slices.Contains(vllmDtypes, e.Dtype) {
-		return fmt.Errorf("%s must be one of %v", field("dtype"), vllmDtypes)
+		errs = append(errs, field.NotSupported(path.Child("dtype"), e.Dtype, vllmDtypes))
 	}
 	for _, f := range []struct{ name, value string }{
 		{"quantization", e.Quantization},
@@ -54,10 +55,10 @@ func validateEngine(e *components.VllmEngineSpec) error {
 		{"reasoningParser", e.ReasoningParser},
 	} {
 		if f.value != "" && !vllmFlagValue.MatchString(f.value) {
-			return fmt.Errorf("%s %q must be a single word of letters, digits, '_', '-' or '.'", field(f.name), f.value)
+			errs = append(errs, field.Invalid(path.Child(f.name), f.value, "must be a single word of letters, digits, '_', '-' or '.'"))
 		}
 	}
-	return nil
+	return errs
 }
 
 // engineArgs renders the engine settings as `vllm serve` flags.

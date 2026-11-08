@@ -2,6 +2,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"regexp"
@@ -18,11 +19,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 	"knative.dev/pkg/apis"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-kserve/definition/components"
@@ -148,200 +151,203 @@ func (s storageContainerSpec) supports(uri string) (bool, error) {
 }
 
 // validatePredictor checks the Instance spec for the predictor topology.
-func validatePredictor(c *controller.Context) error {
-	comp, ok := c.Instance().Spec.Components[common.ComponentPredictor]
-	if !ok {
-		return fmt.Errorf("the %q component is required for the %q topology", common.ComponentPredictor, common.TopologyPredictor)
-	}
+func validatePredictor(in *corev1alpha1.Instance) field.ErrorList {
+	comp := in.Spec.Components[common.ComponentPredictor]
+	paramsPath := predictorPath.Child("parameters")
+
+	var errs field.ErrorList
 	// KServe's webhook rejects other InferenceService names, which would leave
 	// the Instance without a status.
-	if errs := validation.IsDNS1035Label(c.Name()); len(errs) > 0 {
-		return fmt.Errorf("instance name %q is not valid for a predictor: %s", c.Name(), strings.Join(errs, "; "))
+	if msgs := validation.IsDNS1035Label(in.Name); len(msgs) > 0 {
+		errs = append(errs, field.Invalid(field.NewPath("metadata", "name"), in.Name, "a predictor needs a DNS-1035 label: "+strings.Join(msgs, "; ")))
 	}
 
 	var params components.ModelServerCustomSpec
-	c.TryDecodeComponentParameters(comp, &params)
+	decodeParameters(comp.Parameters, &params)
 	params, err := resolveCatalogModel(params)
 	if err != nil {
-		return err
+		return append(errs, field.Invalid(paramsPath.Child("model"), params.Model, "is not in the provider's model catalog"))
 	}
 	if params.UsesCustomContainer() {
-		if err := validateCustomContainer(params); err != nil {
-			return err
-		}
+		errs = append(errs, validateCustomContainer(params, paramsPath)...)
 	} else {
-		if err := validateRuntimeModel(params); err != nil {
-			return err
-		}
+		errs = append(errs, validateRuntimeModel(params, paramsPath)...)
 	}
 	// KServe's HPA raises a floor below 1 to 1 in Standard mode, so 0 would
 	// silently keep one replica instead of scaling to zero.
 	if params.MinReplicas != nil && *params.MinReplicas < 1 {
-		return fmt.Errorf("%s.parameters.minReplicas must be at least 1: scale-to-zero is not supported in KServe Standard mode", common.ComponentPredictor)
+		errs = append(errs, field.Invalid(paramsPath.Child("minReplicas"), *params.MinReplicas, "must be at least 1: KServe Standard mode does not scale to zero"))
 	}
 	if params.MinReplicas == nil && comp.Replicas != nil && *comp.Replicas < 1 {
-		return fmt.Errorf("%s.replicas must be at least 1: scale-to-zero is not supported in KServe Standard mode", common.ComponentPredictor)
+		errs = append(errs, field.Invalid(predictorPath.Child("replicas"), *comp.Replicas, "must be at least 1: KServe Standard mode does not scale to zero"))
 	}
 	if params.GpuCount != nil && *params.GpuCount < 0 {
-		return fmt.Errorf("%s.parameters.gpuCount must not be negative", common.ComponentPredictor)
+		errs = append(errs, field.Invalid(paramsPath.Child("gpuCount"), *params.GpuCount, "must not be negative"))
 	}
 	if params.StorageContainer != "" {
-		if err := validateStorageContainer(c, params.StorageContainer, params.StorageURI); err != nil {
-			return fmt.Errorf("%s.parameters.storageContainer: %w", common.ComponentPredictor, err)
+		if msgs := validation.IsDNS1123Subdomain(params.StorageContainer); len(msgs) > 0 {
+			errs = append(errs, field.Invalid(paramsPath.Child("storageContainer"), params.StorageContainer, strings.Join(msgs, "; ")))
 		}
 	}
 	if comp.Service != nil {
 		switch comp.Service.ServiceType {
 		case "", corev1.ServiceTypeClusterIP, corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeNodePort:
 		default:
-			return fmt.Errorf("%s.service.serviceType must be ClusterIP, LoadBalancer or NodePort", common.ComponentPredictor)
+			errs = append(errs, field.NotSupported(predictorPath.Child("service", "serviceType"), comp.Service.ServiceType, []corev1.ServiceType{
+				corev1.ServiceTypeClusterIP, corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeNodePort,
+			}))
 		}
 	}
 
 	var topo predictor.PredictorTopologyParameters
-	c.TryDecodeTopologyParameters(&topo)
+	decodeParameters(in.GetTopologyParameters(), &topo)
+	accessPath := topologyParametersPath.Child("externalAccess")
 	switch topo.ExternalAccess {
 	case "", predictor.ExternalAccessClusterIP, predictor.ExternalAccessLoadBalancer, predictor.ExternalAccessNodePort, predictor.ExternalAccessEnvoyAIGateway:
 	default:
-		return fmt.Errorf("topology.parameters.externalAccess must be ClusterIP, LoadBalancer, NodePort or EnvoyAIGateway")
+		errs = append(errs, field.NotSupported(accessPath, topo.ExternalAccess, []string{
+			predictor.ExternalAccessClusterIP, predictor.ExternalAccessLoadBalancer, predictor.ExternalAccessNodePort, predictor.ExternalAccessEnvoyAIGateway,
+		}))
 	}
 	if topo.UsesAIGateway() {
-		if !common.AIGatewayEnabled() {
-			return fmt.Errorf("topology.parameters.externalAccess EnvoyAIGateway requires aiGateway.enabled in the provider chart")
-		}
+		errs = append(errs, validateAIGatewayChart(accessPath, topo.ExternalAccess)...)
 		if _, ok := predictorGatewaySchema(params); !ok {
-			return fmt.Errorf("topology.parameters.externalAccess EnvoyAIGateway needs a predictor that serves an API the gateway routes: "+
-				"modelFormat %q with task %q, or an image with apiSchema (or openAICompatible)", huggingFaceModelFormat, textEmbeddingTask)
-		}
-		if err := validateAIGatewayAccess(c, c.Name(), "the predictor serves the model under the Instance name, so use another Instance name"); err != nil {
-			return err
+			errs = append(errs, field.Invalid(accessPath, topo.ExternalAccess, fmt.Sprintf("needs a predictor that serves an API the gateway routes: "+
+				"modelFormat %q with task %q, or an image with apiSchema (or openAICompatible)", huggingFaceModelFormat, textEmbeddingTask)))
 		}
 	} else if params.BackendAPIKeySecret != "" {
-		return fmt.Errorf("%s.parameters.backendAPIKeySecret requires topology.parameters.externalAccess EnvoyAIGateway", common.ComponentPredictor)
+		errs = append(errs, field.Forbidden(paramsPath.Child("backendAPIKeySecret"), "requires topology.parameters.externalAccess EnvoyAIGateway"))
 	}
-	if topo.TokenLimitPerHour != nil {
-		if !topo.UsesAIGateway() {
-			return fmt.Errorf("topology.parameters.tokenLimitPerHour requires externalAccess EnvoyAIGateway")
+	if limit := topo.TokenLimitPerHour; limit != nil {
+		switch {
+		case !topo.UsesAIGateway():
+			errs = append(errs, field.Forbidden(topologyParametersPath.Child("tokenLimitPerHour"), "requires externalAccess EnvoyAIGateway"))
+		case *limit < 1:
+			errs = append(errs, field.Invalid(topologyParametersPath.Child("tokenLimitPerHour"), *limit, "must be greater than zero"))
 		}
-		if *topo.TokenLimitPerHour < 1 {
-			return fmt.Errorf("topology.parameters.tokenLimitPerHour must be greater than zero")
-		}
 	}
-	if err := validatePredictorMetadata(c, params); err != nil {
-		return err
-	}
+	errs = append(errs, validatePredictorMetadata(in, params, paramsPath)...)
 	if params.Config != "" {
-		return validatePredictorConfig(c)
+		if _, err := mergePredictorConfig(params.Config, map[string]any{}); err != nil {
+			errs = append(errs, field.Invalid(paramsPath.Child("config"), field.OmitValueType{}, err.Error()))
+		}
 	}
-	return nil
+	return errs
 }
 
 // validatePredictorMetadata rejects user labels and annotations that are
 // malformed or that would override keys the provider manages.
-func validatePredictorMetadata(c *controller.Context, params components.ModelServerCustomSpec) error {
-	reserved := providerLabelKeys(c)
+func validatePredictorMetadata(in *corev1alpha1.Instance, params components.ModelServerCustomSpec, path *field.Path) field.ErrorList {
+	var errs field.ErrorList
+	reserved := providerLabelKeys(in)
 	for _, k := range slices.Sorted(maps.Keys(params.Labels)) {
+		keyPath := path.Child("labels").Key(k)
 		if _, ok := reserved[k]; ok {
-			return fmt.Errorf("%s.parameters.labels: %q is managed by the provider", common.ComponentPredictor, k)
+			errs = append(errs, field.Forbidden(keyPath, "is managed by the provider"))
+			continue
 		}
-		errs := append(validation.IsQualifiedName(k), validation.IsValidLabelValue(params.Labels[k])...)
-		if len(errs) > 0 {
-			return fmt.Errorf("%s.parameters.labels: invalid label %q: %s", common.ComponentPredictor, k, strings.Join(errs, "; "))
+		if msgs := append(validation.IsQualifiedName(k), validation.IsValidLabelValue(params.Labels[k])...); len(msgs) > 0 {
+			errs = append(errs, field.Invalid(keyPath, params.Labels[k], strings.Join(msgs, "; ")))
 		}
 	}
 	for _, k := range slices.Sorted(maps.Keys(params.Annotations)) {
+		keyPath := path.Child("annotations").Key(k)
 		if k == common.DeploymentModeAnnotation {
-			return fmt.Errorf("%s.parameters.annotations: %q is managed by the provider", common.ComponentPredictor, k)
+			errs = append(errs, field.Forbidden(keyPath, "is managed by the provider"))
+			continue
 		}
-		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
-			return fmt.Errorf("%s.parameters.annotations: invalid key %q: %s", common.ComponentPredictor, k, strings.Join(errs, "; "))
+		if msgs := validation.IsQualifiedName(k); len(msgs) > 0 {
+			errs = append(errs, field.Invalid(keyPath, k, strings.Join(msgs, "; ")))
 		}
 	}
-	return nil
+	return errs
 }
 
 // validateRuntimeModel checks a predictor served by a KServe serving runtime.
-func validateRuntimeModel(params components.ModelServerCustomSpec) error {
+func validateRuntimeModel(params components.ModelServerCustomSpec, path *field.Path) field.ErrorList {
+	var errs field.ErrorList
 	if params.ModelFormat == "" {
-		return fmt.Errorf("%s.parameters.modelFormat is required", common.ComponentPredictor)
+		errs = append(errs, field.Required(path.Child("modelFormat"), ""))
 	}
 	if params.StorageURI == "" {
-		return fmt.Errorf("%s.parameters.storageURI is required", common.ComponentPredictor)
+		errs = append(errs, field.Required(path.Child("storageURI"), ""))
 	}
 	if params.Task != "" && !strings.EqualFold(params.ModelFormat, huggingFaceModelFormat) {
-		return fmt.Errorf("%s.parameters.task is only supported with modelFormat %q", common.ComponentPredictor, huggingFaceModelFormat)
+		errs = append(errs, field.Forbidden(path.Child("task"), fmt.Sprintf("is only supported with modelFormat %q", huggingFaceModelFormat)))
 	}
 	imageOnly := map[string]bool{
-		"command":          len(params.Command) > 0,
-		"port":             params.Port != nil,
-		"healthPath":       params.HealthPath != "",
+		"command":             len(params.Command) > 0,
+		"port":                params.Port != nil,
+		"healthPath":          params.HealthPath != "",
 		"openAICompatible":    params.OpenAICompatible,
 		"apiSchema":           params.APISchema != "",
 		"backendAPIKeySecret": params.BackendAPIKeySecret != "",
 		"servedModelName":     params.ServedModelName != "",
 		"imagePullSecret":     params.ImagePullSecret != "",
 	}
-	for _, field := range slices.Sorted(maps.Keys(imageOnly)) {
-		if imageOnly[field] {
-			return fmt.Errorf("%s.parameters.%s requires image", common.ComponentPredictor, field)
+	for _, name := range slices.Sorted(maps.Keys(imageOnly)) {
+		if imageOnly[name] {
+			errs = append(errs, field.Forbidden(path.Child(name), "requires image"))
 		}
 	}
-	return nil
+	return errs
 }
 
 // validateCustomContainer checks a predictor that runs a user image.
-func validateCustomContainer(params components.ModelServerCustomSpec) error {
+func validateCustomContainer(params components.ModelServerCustomSpec, path *field.Path) field.ErrorList {
+	var errs field.ErrorList
 	runtimeOnly := map[string]string{
 		"modelFormat":    params.ModelFormat,
 		"runtime":        params.Runtime,
 		"runtimeVersion": params.RuntimeVersion,
 		"task":           params.Task,
 	}
-	for _, field := range slices.Sorted(maps.Keys(runtimeOnly)) {
-		if runtimeOnly[field] != "" {
-			return fmt.Errorf("%s.parameters.%s selects a KServe serving runtime and cannot be combined with image", common.ComponentPredictor, field)
+	for _, name := range slices.Sorted(maps.Keys(runtimeOnly)) {
+		if runtimeOnly[name] != "" {
+			errs = append(errs, field.Forbidden(path.Child(name), "selects a KServe serving runtime and cannot be combined with image"))
 		}
 	}
 	if port := params.ContainerPort(); port < 1 || port > 65535 {
-		return fmt.Errorf("%s.parameters.port must be between 1 and 65535", common.ComponentPredictor)
+		errs = append(errs, field.Invalid(path.Child("port"), port, "must be between 1 and 65535"))
 	}
 	if params.HealthPath != "" && !strings.HasPrefix(params.HealthPath, "/") {
-		return fmt.Errorf("%s.parameters.healthPath must start with /", common.ComponentPredictor)
+		errs = append(errs, field.Invalid(path.Child("healthPath"), params.HealthPath, "must start with /"))
 	}
 	if params.ImagePullSecret != "" {
-		if errs := validation.IsDNS1123Subdomain(params.ImagePullSecret); len(errs) > 0 {
-			return fmt.Errorf("%s.parameters.imagePullSecret: %s", common.ComponentPredictor, strings.Join(errs, "; "))
+		if msgs := validation.IsDNS1123Subdomain(params.ImagePullSecret); len(msgs) > 0 {
+			errs = append(errs, field.Invalid(path.Child("imagePullSecret"), params.ImagePullSecret, strings.Join(msgs, "; ")))
 		}
 	}
 	switch params.APISchema {
 	case "", components.APISchemaOpenAI:
 	case components.APISchemaTypeSafe:
 		if params.OpenAICompatible {
-			return fmt.Errorf("%s.parameters.openAICompatible conflicts with apiSchema %q", common.ComponentPredictor, params.APISchema)
+			errs = append(errs, field.Invalid(path.Child("openAICompatible"), true, fmt.Sprintf("conflicts with apiSchema %q", params.APISchema)))
 		}
 	default:
-		return fmt.Errorf("%s.parameters.apiSchema must be %s or %s", common.ComponentPredictor, components.APISchemaOpenAI, components.APISchemaTypeSafe)
+		errs = append(errs, field.NotSupported(path.Child("apiSchema"), params.APISchema, []string{components.APISchemaOpenAI, components.APISchemaTypeSafe}))
 	}
 	if params.BackendAPIKeySecret != "" {
-		if errs := validation.IsDNS1123Subdomain(params.BackendAPIKeySecret); len(errs) > 0 {
-			return fmt.Errorf("%s.parameters.backendAPIKeySecret: %s", common.ComponentPredictor, strings.Join(errs, "; "))
+		if msgs := validation.IsDNS1123Subdomain(params.BackendAPIKeySecret); len(msgs) > 0 {
+			errs = append(errs, field.Invalid(path.Child("backendAPIKeySecret"), params.BackendAPIKeySecret, strings.Join(msgs, "; ")))
 		}
 	}
 	if params.StorageContainer != "" && params.StorageURI == "" {
-		return fmt.Errorf("%s.parameters.storageContainer requires storageURI", common.ComponentPredictor)
+		errs = append(errs, field.Forbidden(path.Child("storageContainer"), "requires storageURI"))
 	}
-	return nil
+	return errs
 }
 
 // providerLabelKeys are the labels the provider puts on the InferenceService
 // and the predictor pods.
-func providerLabelKeys(c *controller.Context) map[string]struct{} {
+func providerLabelKeys(in *corev1alpha1.Instance) map[string]struct{} {
 	keys := map[string]struct{}{
 		controller.ProviderLabel:  {},
 		controller.InstanceLabel:  {},
 		controller.ComponentLabel: {},
 	}
-	for k := range c.ObjectMeta(c.Name()).Labels {
+	// ObjectMeta reads only the Instance.
+	for k := range controller.NewContext(context.Background(), nil, in, common.ProviderName).ObjectMeta(in.Name).Labels {
 		keys[k] = struct{}{}
 	}
 	return keys
@@ -350,38 +356,34 @@ func providerLabelKeys(c *controller.Context) map[string]struct{} {
 // validateStorageContainer mirrors the checks KServe's pod webhook runs on a
 // named ClusterStorageContainer; failing them there leaves the Instance stuck
 // provisioning with the error only in ReplicaSet events.
-func validateStorageContainer(c *controller.Context, name, storageURI string) error {
-	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
-		return fmt.Errorf("invalid name %q: %s", name, strings.Join(errs, "; "))
-	}
-
+func validateStorageContainer(c *controller.Context, path *field.Path, name, storageURI string) (field.ErrorList, error) {
 	obj := unstructuredObject(clusterStorageContainerGVK)
 	if err := c.Client().Get(c.Context(), client.ObjectKey{Name: name}, obj); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("ClusterStorageContainer %q not found", name)
+			return field.ErrorList{field.NotFound(path, name)}, nil
 		}
-		return fmt.Errorf("getting ClusterStorageContainer %q: %w", name, err)
+		return nil, fmt.Errorf("getting ClusterStorageContainer %q: %w", name, err)
 	}
 	var csc clusterStorageContainer
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &csc); err != nil {
-		return fmt.Errorf("decoding ClusterStorageContainer %q: %w", name, err)
+		return nil, fmt.Errorf("decoding ClusterStorageContainer %q: %w", name, err)
 	}
 
 	if csc.Disabled != nil && *csc.Disabled {
-		return fmt.Errorf("ClusterStorageContainer %q is disabled", name)
+		return field.ErrorList{field.Invalid(path, name, "the ClusterStorageContainer is disabled")}, nil
 	}
 	// KServe defaults an empty workloadType to initContainer.
 	if wt := csc.Spec.WorkloadType; wt != "" && wt != storageContainerWorkloadInitContainer {
-		return fmt.Errorf("ClusterStorageContainer %q has workloadType %q, want %q", name, wt, storageContainerWorkloadInitContainer)
+		return field.ErrorList{field.Invalid(path, name, fmt.Sprintf("the ClusterStorageContainer has workloadType %q, want %q", wt, storageContainerWorkloadInitContainer))}, nil
 	}
 	supported, err := csc.Spec.supports(storageURI)
 	if err != nil {
-		return fmt.Errorf("ClusterStorageContainer %q: %w", name, err)
+		return field.ErrorList{field.Invalid(path, name, "the ClusterStorageContainer has an invalid URI format: "+err.Error())}, nil
 	}
 	if !supported {
-		return fmt.Errorf("ClusterStorageContainer %q does not support storageURI %q", name, storageURI)
+		return field.ErrorList{field.Invalid(path, name, fmt.Sprintf("the ClusterStorageContainer does not support storageURI %q", storageURI))}, nil
 	}
-	return nil
+	return nil, nil
 }
 
 // buildInferenceService translates an Instance into an InferenceService.

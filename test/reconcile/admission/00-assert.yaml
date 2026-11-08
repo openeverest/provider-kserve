@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: provider-kserve
+  namespace: default
+status:
+  readyReplicas: 1
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: provider-kserve.openeverest.io
+webhooks:
+  - name: instances.provider-kserve.openeverest.io
+    failurePolicy: Ignore

@@ -3,4 +3,6 @@ kind: Instance
 metadata:
   name: test-predictor-csc-missing
 status:
-  phase: Failed
+  (conditions[?type == 'Ready']):
+    - status: "False"
+      reason: InvalidReference
