@@ -1,0 +1,22 @@
+# KServe is tracked as the bundled Helm subcharts kserve-resources and
+# kserve-llmisvc-resources (charts/provider-kserve/Chart.yaml, oci://ghcr.io/kserve/charts).
+# They share one version and are grouped into a single PR. The Go module stays on
+# an -rc tag on purpose (the release exceeds the Go module size limit), so it is
+# not tracked here.
+version: 2
+
+updates:
+  - package-ecosystem: "helm"
+    directory: "/charts/provider-kserve"
+    schedule:
+      interval: "daily"
+    allow:
+      - dependency-name: "kserve-resources"
+      - dependency-name: "kserve-llmisvc-resources"
+    labels:
+      - "dependencies"
+    groups:
+      kserve:
+        patterns:
+          - "kserve-resources"
+          - "kserve-llmisvc-resources"
