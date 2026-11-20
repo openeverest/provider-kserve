@@ -25,9 +25,9 @@ const (
 	defaultMetricsPath = "/metrics"
 	// kserveComponentLabel tells KServe's LLM workload pods (the vLLM servers)
 	// from the router and scheduler pods of the same LLMInferenceService.
-	kserveComponentLabel  = "kserve.io/component"
+	kserveComponentLabel    = "kserve.io/component"
 	kserveWorkloadComponent = "workload"
-	legacyPodMonitorSuffix = "-metrics"
+	legacyPodMonitorSuffix  = "-metrics"
 )
 
 var _ controller.MonitoringSourcesProvider = (*Provider)(nil)
