@@ -55,6 +55,7 @@ without `--version` takes the latest.
 
 | provider-kserve | OpenEverest | KServe | Kubernetes |
 |---|---|---|---|
+| `0.6.x` | `2.0.0-alpha.1` | `0.21.0` | `1.32` – `1.36` |
 | `0.5.x` | `>= 2.0.0-dev.4` | `0.21.0` | `1.30` – `1.36` |
 | `0.4.x` | `>= 2.0.0-dev.4` | `0.21.0` | `1.30` – `1.36` |
 | `0.2.3` – `0.3.0` | `>= 2.0.0-dev.4` | `0.21.0-rc1` | `1.30` – `1.36` |
@@ -63,6 +64,12 @@ without `--version` takes the latest.
 
 From `0.2.3` the provider reports per-component status and applies pod scheduling policies,
 which need the Instance API of OpenEverest `2.0.0-dev.4`.
+
+`0.6.x` is built for OpenEverest `2.0.0-alpha.1`: it publishes metrics through the monitoring
+contract, ships `ClusterInstancePreset`s and reports Instance status as facts. Earlier releases
+write Instance phases the alpha.1 CRD rejects, and `0.6.x` needs the alpha.1 monitoring and
+preset CRDs. Install it on a fresh cluster, as for the core. The exact core version is named
+because SemVer ranks `2.0.0-dev.4` above `2.0.0-alpha.1`.
 
 ## Capabilities
 
