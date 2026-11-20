@@ -85,8 +85,9 @@ type LlmTopologyParameters struct {
 	// Unset copies llmEngine.resources. Requires PrefillWorkerCount.
 	PrefillWorkerResources *corev1.ResourceRequirements `json:"prefillWorkerResources,omitempty"`
 
-	// EnableMetrics emits a Prometheus Operator PodMonitor for this instance's
-	// vLLM pods (/metrics). Nil/unset defaults to true for backward compatibility.
+	// EnableMetrics publishes vLLM's /metrics endpoint in
+	// status.monitoring.sources, for the monitoring destinations the Instance
+	// lists. Nil/unset defaults to true.
 	EnableMetrics *bool `json:"enableMetrics,omitempty"`
 
 	// EnableTracing turns on KServe's built-in distributed tracing (OTLP) across
@@ -101,7 +102,7 @@ type LlmTopologyParameters struct {
 	TracingEndpoint string `json:"tracingEndpoint,omitempty"`
 }
 
-// MetricsEnabled reports whether this instance should emit a vLLM PodMonitor.
+// MetricsEnabled reports whether this instance publishes vLLM's metrics endpoint.
 func (t LlmTopologyParameters) MetricsEnabled() bool {
 	if t.EnableMetrics == nil {
 		return true

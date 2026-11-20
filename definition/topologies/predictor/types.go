@@ -38,12 +38,13 @@ type PredictorTopologyParameters struct {
 	// backend; unset uses the provider default.
 	TokenLimitPerHour *int32 `json:"tokenLimitPerHour,omitempty"`
 
-	// EnableMetrics emits a Prometheus Operator PodMonitor for the predictor
-	// pods. Unset means enabled, as for the llm topology.
+	// EnableMetrics publishes the model server's metrics endpoint in
+	// status.monitoring.sources. Unset means enabled, as for the llm topology;
+	// turn it off for a custom container without a Prometheus endpoint.
 	EnableMetrics *bool `json:"enableMetrics,omitempty"`
 }
 
-// MetricsEnabled reports whether this instance should emit a PodMonitor.
+// MetricsEnabled reports whether this instance publishes its metrics endpoint.
 func (t PredictorTopologyParameters) MetricsEnabled() bool {
 	return t.EnableMetrics == nil || *t.EnableMetrics
 }

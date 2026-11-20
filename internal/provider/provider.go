@@ -39,10 +39,6 @@ func New() *Provider {
 			controller.WatchOwned(&corev1.Secret{}, predicate.NewPredicateFuncs(isAIGatewayKeySecret)),
 		)
 	}
-	// Note: the PodMonitor is intentionally NOT watched. Owning a watch on
-	// monitoring.coreos.com/PodMonitor would fail the manager at startup on any
-	// cluster without the Prometheus Operator CRDs. Since metrics default on, we
-	// keep the emit-only path and let the periodic resync re-apply on drift.
 
 	return &Provider{
 		BaseProvider: controller.BaseProvider{

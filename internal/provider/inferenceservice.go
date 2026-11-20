@@ -456,7 +456,7 @@ func buildInferenceService(c *controller.Context) (*unstructured.Unstructured, e
 	meta.Labels = mergeMaps(params.Labels, meta.Labels)
 	annotations := params.Annotations
 	if params.UsesCustomContainer() {
-		// The PodMonitor reads the metrics endpoint from these; a serving
+		// The published metrics endpoint is read from these; a serving
 		// runtime would set them, a custom image has none.
 		annotations = mergeMaps(map[string]string{
 			metricsPortAnnotation: strconv.Itoa(int(params.ContainerPort())),
@@ -692,7 +692,7 @@ func (p *Provider) syncPredictor(c *controller.Context) error {
 	}
 	var topo predictor.PredictorTopologyParameters
 	c.TryDecodeTopologyParameters(&topo)
-	if err := syncPodMonitor(c, topo.MetricsEnabled(), buildPredictorPodMonitor(c.Name(), c.Instance().Namespace, c.PodLabels(common.ComponentPredictor), common.PodMonitorInterval())); err != nil {
+	if err := deleteLegacyPodMonitor(c); err != nil {
 		return err
 	}
 	if err := syncPredictorAIGateway(c, topo, params); err != nil {

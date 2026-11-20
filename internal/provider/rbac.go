@@ -45,8 +45,15 @@ package provider
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch
 
-// Prometheus Operator PodMonitor emitted per Instance (optional metrics):
-// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=podmonitors,verbs=get;list;watch;create;update;patch;delete
+// Monitoring contract: the runtime watches the Instances' bindings and the
+// destinations and classes they reference, writes the bindings' status, and
+// reads the kube-system namespace UID that identifies the cluster.
+// +kubebuilder:rbac:groups=monitoring.openeverest.io,resources=monitoringclasses;monitoringdestinations;monitoringbindings,verbs=get;list;watch
+// +kubebuilder:rbac:groups=monitoring.openeverest.io,resources=monitoringbindings/status,verbs=patch
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get
+// Releases before the monitoring contract created a PodMonitor per Instance;
+// Sync deletes it.
+// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=podmonitors,verbs=delete
 
 // Core resources referenced by model serving (model credentials, endpoints).
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete

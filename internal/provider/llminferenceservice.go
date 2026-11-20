@@ -933,8 +933,7 @@ func (p *Provider) syncLLM(c *controller.Context) error {
 	var topo llm.LlmTopologyParameters
 	c.TryDecodeTopologyParameters(&topo)
 
-	// Per-instance vLLM PodMonitor (guarded by chart + instance flags).
-	if err := syncPodMonitor(c, topo.MetricsEnabled(), buildPodMonitor(c.Name(), c.Instance().Namespace, workloadPodSelector(c.Name()), vllmServingPort, "/metrics", common.PodMonitorInterval())); err != nil {
+	if err := deleteLegacyPodMonitor(c); err != nil {
 		return err
 	}
 

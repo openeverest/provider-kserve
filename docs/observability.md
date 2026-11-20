@@ -3,11 +3,11 @@
 > **New here?** Read [observability-overview.md](observability-overview.md) first
 > for the mental model (provider vs Prometheus vs Grafana, vLLM vs gateway).
 
-This provider makes its LLM model workloads **discoverable** by a Prometheus
-that already exists in the cluster. It ships **no** monitoring stack (no
-Prometheus, no Grafana) and adds **no** metric-aggregation code — vLLM already
-exposes Prometheus metrics on a single endpoint, so there is nothing to
-aggregate.
+This provider makes its model workloads' metrics **discoverable** through
+OpenEverest's monitoring contract. It ships **no** monitoring stack (no
+Prometheus, no Grafana) and adds **no** metric-aggregation code: vLLM and the
+KServe model servers already expose Prometheus metrics on a single endpoint, so
+there is nothing to aggregate.
 
 > **Not qpext.** KServe's [`qpext`](https://github.com/kserve/kserve/blob/master/qpext/README.md)
 > extends the Knative **queue-proxy** sidecar to merge two containers' metrics
@@ -18,122 +18,90 @@ aggregate.
 
 ## How it works
 
-When `metrics.podMonitor.enabled` is on (the default), the provider creates one
-`PodMonitor` (`monitoring.coreos.com/v1`) per Instance, owned by that Instance
-and labeled `core.openeverest.io/instance=<instance>`, which is how
-[plugin-metrics](https://github.com/openeverest/plugin-metrics) finds it to show
-the Instance's Metrics tab. The Prometheus Operator turns that `PodMonitor` into
-a scrape job. `llm` scrapes vLLM `:8000/metrics`; `predictor` scrapes the port
-and path the serving runtime declares in its `prometheus.kserve.io/port` and
-`/path` annotations, which KServe copies onto the predictor pods
-(`:8080/metrics` for most runtimes, Triton `:8002`, TorchServe `:8082`).
+Monitoring backends are OpenEverest plugins. A monitoring integration (for
+example [monitoring-prometheus](https://github.com/openeverest/monitoring-prometheus)
+or [monitoring-victoriametrics](https://github.com/openeverest/monitoring-victoriametrics))
+installs a `MonitoringClass`. A `MonitoringDestination` in the Instance's
+namespace points at a backend, and the Instance lists the destinations it sends
+metrics to:
+
+```yaml
+spec:
+  monitoring:
+    destinations:
+      - {name: prometheus, destinationRef: {name: prometheus}}
+```
+
+The provider publishes each Instance's metrics endpoint in
+`status.monitoring.sources.metrics`, and the integration behind the
+destination's class creates the scrape objects (for example a `PodMonitor`):
+
+- `llm`: vLLM's `:8000/metrics` on the decode and prefill workload pods.
+- `predictor`: the port and path the serving runtime declares in its
+  `prometheus.kserve.io/port` and `/path` annotations, which KServe copies onto
+  the predictor pods (`:8080/metrics` for most runtimes, Triton `:8002`,
+  TorchServe `:8082`). It is read from a predictor pod, so it is published
+  once one exists.
 
 ```mermaid
 flowchart TB
     subgraph model_ns["Instance namespace"]
-      I["Instance CR"]
+      I["Instance CR<br/>spec.monitoring.destinations"]
       L["LLMInferenceService (KServe)"]
-      POD["vLLM model pod<br/>1 container :8000/metrics"]
-      PM["PodMonitor CR"]
-    end
-    subgraph mon_ns["monitoring namespace (pre-existing)"]
-      PO["Prometheus Operator"]
-      PROM["Prometheus"]
-      GRAF["Grafana"]
+      POD["vLLM model pod<br/>:8000/metrics"]
+      D["MonitoringDestination"]
+      SM["scrape object<br/>(e.g. PodMonitor)"]
     end
     I -->|watch| P["provider-kserve"]
     P -->|create| L
-    P -->|create when enabled| PM
+    P -->|status.monitoring.sources| I
     L -->|reconcile| POD
-    PM -.discovered by.-> PO
-    PO -->|writes scrape config| PROM
-    PROM -->|GET :8000/metrics every 30s| POD
-    GRAF -->|PromQL| PROM
+    D --> X["monitoring integration"]
+    I -.sources.-> X
+    X -->|create| SM
+    SM -.scraped by.-> PROM["Prometheus / VictoriaMetrics"]
+    PROM -->|GET :8000/metrics| POD
 ```
 
-The provider's part is just the `PodMonitor`. Everything else (Operator,
-Prometheus, Grafana) is platform infrastructure the provider does not own.
+Both component types serve their metrics natively (`metrics: Native` in
+`definition/monitoring.yaml`), so binding a destination restarts nothing. The
+component types declare the kinds `vllm` and `kserve-model-server`, which a
+`MonitoringClass` can match.
 
 ## Enabling / disabling
 
-Metrics are **on by default** and safe to leave on: if the
-`monitoring.coreos.com` CRDs are not installed, the provider **skips** emitting
-the `PodMonitor` instead of erroring the reconcile. Install the Prometheus
-Operator later and the next reconcile emits it automatically.
+Endpoints are published by default. Set `enableMetrics: false` in the topology
+parameters (Observability → metrics toggle in the UI) to publish none, for
+example for a custom container without a Prometheus endpoint.
 
-```yaml
-# values.yaml
-metrics:
-  podMonitor:
-    enabled: true     # default; set false to never emit a PodMonitor
-    interval: 30s     # scrape interval
-```
+To scrape with a tool OpenEverest does not configure (a hand-written
+`PodMonitor`, Datadog, Alloy), set `spec.monitoring.sources.metrics.policy:
+Always` and read the endpoints from the Instance status:
 
 ```bash
-# turn it off for a release
-helm upgrade provider-kserve ... --set metrics.podMonitor.enabled=false
+kubectl get instance <name> -o jsonpath='{.status.monitoring.sources.metrics}'
 ```
 
-## The one gotcha that actually bites: selector scoping
+> **Upgrading from 0.5.x:** earlier releases created a `PodMonitor`
+> (`<instance>-metrics`) per Instance, controlled by `metrics.podMonitor.enabled`.
+> The provider now deletes it on the next reconcile. List a destination in
+> `spec.monitoring.destinations` to keep collecting metrics.
+> `metrics.podMonitor` now only controls the AI Gateway's PodMonitor.
 
-A `PodMonitor` is only honored if the Prometheus resource's
-`podMonitorSelector` / `podMonitorNamespaceSelector` matches it. Many clusters
-set these to "match everything"; some filter by label or namespace. If yours
-filters, the `PodMonitor` is created but **silently ignored**.
-
-**First thing to check when "no vLLM metrics show up":**
+## When no metrics show up
 
 ```bash
-# 1. Is the PodMonitor there?
-kubectl get podmonitor -n <instance-namespace>
+# 1. Is the endpoint published?
+kubectl get instance <name> -n <ns> -o jsonpath='{.status.monitoring.sources.metrics}'
 
-# 2. Does the pod actually serve metrics?
-kubectl port-forward -n <instance-namespace> pod/<vllm-pod> 8000:8000
+# 2. Is the destination bound and ready?
+kubectl get instance <name> -n <ns> \
+  -o jsonpath='{range .status.conditions[?(@.type=="MonitoringReady")]}{.status} {.reason}: {.message}{"\n"}{end}'
+
+# 3. Does the pod actually serve metrics?
+kubectl port-forward -n <ns> pod/<vllm-pod> 8000:8000
 curl -s localhost:8000/metrics | grep '^vllm:' | head
-
-# 3. Does Prometheus select PodMonitors in this namespace?
-kubectl get prometheus -A \
-  -o jsonpath='{range .items[*]}{.metadata.name}{": podMonitorSelector="}{.spec.podMonitorSelector}{" nsSelector="}{.spec.podMonitorNamespaceSelector}{"\n"}{end}'
 ```
-
-If step 3 shows a selector that excludes your namespace/labels, that is a
-Prometheus configuration change (outside this provider): widen the selector or
-label the namespace/`PodMonitor` to match.
-
-Other gotchas:
-
-- **CRD absent** → handled: the provider skips, logs at `-v1`, does not error.
-- **Namespace rule** → a `PodMonitor` (default `namespaceSelector`) matches only
-  pods in **its own** namespace; the provider places it alongside the workload,
-  which is correct.
-- **Port** → `8000` for `llm` (vLLM). For `predictor` the runtime's
-  `prometheus.kserve.io/port` annotation, falling back to `8080`; the
-  `PodMonitor` sets the target address by relabeling because KServe declares no
-  container ports on predictor pods, so a `targetPort` would match nothing.
-- **Disable** → turning the chart or instance flag off deletes the Instance's
-  `PodMonitor` on its next reconcile.
-- **Drift** → the `PodMonitor` is not watched (owning that watch would fail the
-  manager on CRD-less clusters), so a manual edit/delete is corrected on the
-  next periodic resync, not instantly.
-
-## PodMonitor vs ServiceMonitor
-
-Both are Prometheus Operator CRs that generate scrape config; they differ in
-what they target.
-
-| | PodMonitor (used here) | ServiceMonitor |
-|---|---|---|
-| Targets | Pods, by pod labels | Services → the backing Endpoints |
-| Needs a Service? | No | Yes |
-| Port by | container port number/name | Service port **name** |
-| Best when | you own the pods but not a stable Service | you have a Service with a well-named metrics port |
-
-**Why PodMonitor here:** the KServe workload `Service` is KServe-owned and its
-port name is not guaranteed stable across versions, and it is `ClusterIP`-only
-(the provider's external Service exists only for `LoadBalancer`/`NodePort`). A
-`PodMonitor` selects the workload pods directly by labels the provider already
-stamps, targeting port `8000` by **number** — so nothing depends on Service or
-container-port naming.
 
 ## What metrics a vLLM pod gives you
 
@@ -232,7 +200,8 @@ flowchart LR
     POD -->|/metrics| PROM["Prometheus"]
     PROM --> GRAF["Grafana dashboard"]
     subgraph provider["control plane"]
-      P["provider-kserve"] -->|PodMonitor| PROM
+      P["provider-kserve"] -->|sources| X["monitoring integration"]
+      X -->|scrape config| PROM
     end
 ```
 

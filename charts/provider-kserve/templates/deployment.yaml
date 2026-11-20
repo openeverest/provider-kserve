@@ -86,10 +86,6 @@ spec:
               value: {{ .Values.aiGateway.auth.enabled | quote }}
             - name: AI_GATEWAY_AUTH_ALLOW_INSECURE_HTTP
               value: {{ .Values.aiGateway.auth.allowInsecureHTTP | quote }}
-            - name: ENABLE_POD_MONITOR
-              value: {{ .Values.metrics.podMonitor.enabled | quote }}
-            - name: POD_MONITOR_INTERVAL
-              value: {{ .Values.metrics.podMonitor.interval | quote }}
             - name: LORA_ADAPTER_CATALOG
               value: {{ .Values.loraAdapters | toJson | quote }}
             - name: PREDICTOR_MODEL_CATALOG

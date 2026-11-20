@@ -76,7 +76,7 @@ provider itself is covered under [Installation](#installation).
 | Vertical scaling (CPU / memory) | ✅ | `spec.components.<name>.resources`; limits are mirrored into requests (Guaranteed QoS) |
 | Version upgrades | ✅ | of the deployed serving runtime version — change `spec.version`; see [Versions](#versions) |
 | Custom configuration | ✅ | structured parameters, plus inline spec config for both `llm` and `predictor` |
-| Monitoring | ✅ | a `PodMonitor` per `llm` and `predictor` Instance; gateway token/cost metrics when the AI Gateway is enabled |
+| Monitoring | ✅ | vLLM and model server metrics endpoints published through the [monitoring contract](#observability); gateway token/cost metrics when the AI Gateway is enabled |
 | TLS | ✅ | optional HTTPS on the shared Envoy AI Gateway, issued by cert-manager |
 
 Models are pulled from the URI given in the component parameters (`hf://`, `s3://`, `pvc://`,
@@ -319,7 +319,7 @@ tolerations, topology spread constraints) is applied to the predictor pods.
 |---|---|---|
 | `externalAccess` | string | `ClusterIP` (default), `LoadBalancer`, `NodePort`, or `EnvoyAIGateway` (embedding models and custom containers with an `apiSchema`). Takes precedence over `predictor.service.serviceType`. |
 | `tokenLimitPerHour` | int32 | Per-API-key hourly token quota. Only valid with Envoy AI Gateway. Defaults to 1000 when a Redis/Valkey rate-limit backend is configured. |
-| `enableMetrics` | bool | Emit a PodMonitor for the predictor pods. Defaults to enabled. |
+| `enableMetrics` | bool | Publish the model server's metrics endpoint to monitoring. Defaults to enabled. |
 
 With `LoadBalancer` or `NodePort` the provider creates `<instance>-external` (port 80 → 8080)
 and publishes its address as the connection details. With `ClusterIP` they point at KServe's
@@ -374,7 +374,7 @@ an OpenAI-compatible `/openai/v1/embeddings` endpoint. See
 | `prefillPipelineParallelSize` | int32 | Prefill pipeline parallelism. Required when `prefillWorkerCount` is set (`count + 1`). |
 | `prefillWorkerCount` | int32 | Extra prefill worker pods besides the prefill head. Requires `enablePrefill`. |
 | `prefillWorkerResources` | ResourceRequirements | Optional prefill worker resources. Unset copies `llmEngine.resources`. Requires `prefillWorkerCount`. |
-| `enableMetrics` | bool | Emit a vLLM PodMonitor for this instance (`/metrics`). Defaults to enabled. |
+| `enableMetrics` | bool | Publish vLLM's metrics endpoint (`:8000/metrics`) to monitoring. Defaults to enabled. |
 | `enableTracing` | bool | Enable KServe distributed tracing (OTLP) across gateway/scheduler/model. Disabled by default. |
 | `tracingEndpoint` | string | Optional OTLP exporter endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`); used only when `enableTracing` is true. |
 
@@ -968,7 +968,7 @@ components:
   `externalAccess: EnvoyAIGateway` publishes the model on the
   [Envoy AI Gateway](#envoy-ai-gateway); with `apiSchema: TypeSafe`, a
   [decision model](#decision-models-typesafe-system-one) is published the same way.
-- Metrics: the PodMonitor scrapes `/metrics` on `port`. Override with the
+- Metrics: the published endpoint is `/metrics` on `port`. Override with the
   `prometheus.kserve.io/port` and `prometheus.kserve.io/path` `annotations`, or turn
   `enableMetrics` off for servers without a Prometheus endpoint.
 
@@ -1108,12 +1108,35 @@ without extra settings; other tolerations come from `schedulingPolicy`.
 
 ### Observability
 
-Each `llm` Instance gets a `PodMonitor` so an existing Prometheus Operator scrapes vLLM's
-`:8000/metrics`. Each `predictor` Instance gets one for the metrics port and path the serving
-runtime declares (`:8080/metrics` for most, Triton `:8002`, TorchServe `:8082`). Both are on by
-default and safely skipped when the `monitoring.coreos.com`
-CRDs are absent. See [docs/observability.md](docs/observability.md) and the
+Metrics are collected through OpenEverest's monitoring integrations. Install one (for example
+[monitoring-prometheus](https://github.com/openeverest/monitoring-prometheus) or
+[monitoring-victoriametrics](https://github.com/openeverest/monitoring-victoriametrics)),
+create a `MonitoringDestination`, and list it on the Instance:
+
+```yaml
+spec:
+  monitoring:
+    destinations:
+      - {name: prometheus, destinationRef: {name: prometheus}}
+```
+
+The provider publishes each Instance's endpoint in `status.monitoring.sources`, and the
+integration creates the scrape objects:
+
+- `llm`: vLLM's `:8000/metrics` on the decode and prefill pods (component type `vllm`, kind `vllm`).
+- `predictor`: the port and path the serving runtime declares (`:8080/metrics` for most,
+  Triton `:8002`, TorchServe `:8082`), once a predictor pod exists (component type
+  `modelServer`, kind `kserve-model-server`).
+
+Both serve their metrics natively, so binding a destination restarts nothing. Set
+`enableMetrics: false` to publish no endpoint, for a model server without one. To scrape with a
+tool OpenEverest does not configure, set `spec.monitoring.sources.metrics.policy: Always` and
+read the endpoints from the status. See [docs/observability.md](docs/observability.md) and the
 [vLLM Grafana dashboard](docs/dashboards/vllm.json).
+
+> **Upgrading from 0.5.x:** the provider no longer creates a `PodMonitor` per Instance and
+> deletes the `<instance>-metrics` one earlier releases created. List a destination in
+> `spec.monitoring.destinations` to keep collecting metrics.
 
 When the AI Gateway is enabled, the chart also scrapes gateway `gen_ai.*` token/cost metrics.
 See [docs/observability-gateway.md](docs/observability-gateway.md) and

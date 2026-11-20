@@ -364,18 +364,17 @@ storageInitializer:
     limits:
       memory: 4Gi
 
-# Prometheus Operator metrics scraping. The provider ships no monitoring stack;
-# it only makes model workloads discoverable by an existing Prometheus Operator.
+# Metrics scraping. The provider ships no monitoring stack. Model metrics are
+# published per Instance through the monitoring contract and scraped by the
+# monitoring integration of the destinations the Instance lists; see
+# docs/observability.md.
 metrics:
   podMonitor:
-    # -- Emit a PodMonitor per Instance so an existing Prometheus Operator
-    # scrapes the model /metrics endpoint. Safe to leave on: if the
-    # monitoring.coreos.com CRDs are absent the provider skips it instead of
-    # erroring. To actually collect metrics, a Prometheus must select this
-    # PodMonitor (podMonitorSelector/namespaceSelector matching the Instance
-    # namespace). See docs/observability.md.
+    # -- Emit a PodMonitor for the Envoy AI Gateway's gen_ai metrics (with
+    # aiGateway.enabled) so an existing Prometheus Operator scrapes them.
+    # Skipped when the monitoring.coreos.com CRDs are absent.
     enabled: true
-    # -- Scrape interval for the generated PodMonitor
+    # -- Scrape interval for the AI Gateway PodMonitor
     interval: 30s
   grafanaDashboards:
     # -- Create ConfigMaps labeled for kube-prometheus-stack's Grafana dashboard

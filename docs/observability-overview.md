@@ -2,8 +2,8 @@
 
 ## Two metric streams, one Prometheus
 
-Both vLLM and AI Gateway use the **same** Prometheus and Grafana. They differ in
-**who emits the PodMonitor** and **what question the metrics answer**.
+Both vLLM and AI Gateway can land in the **same** Prometheus and Grafana. They
+differ in **who configures the scrape** and **what question the metrics answer**.
 
 ```
                     ┌─────────────────────────────────────┐
@@ -16,9 +16,9 @@ Both vLLM and AI Gateway use the **same** Prometheus and Grafana. They differ in
                     │  Prometheus (scrapes & stores)      │
                     └─▲───────────────────────────────▲──┘
                       │                               │
-         PodMonitor   │                               │  PodMonitor
-         (1 per       │                               │  (1 per cluster,
-          Instance)   │                               │   Helm chart)
+  monitoring  │                               │  PodMonitor
+  integration │                               │  (1 per cluster,
+  (per dest.) │                               │   Helm chart)
                       │                               │
               vLLM pod :8000/metrics          Envoy proxy :aigw-admin/metrics
               "how is the engine?"            "how many tokens passed the gate?"
@@ -27,14 +27,14 @@ Both vLLM and AI Gateway use the **same** Prometheus and Grafana. They differ in
 | | **vLLM metrics** | **AI Gateway metrics** |
 |---|------------------|------------------------|
 | **Question** | Is the model healthy? Queue depth? KV cache? | How many tokens/requests per model at the **entry**? |
-| **Emitted by** | Provider Go (one PodMonitor **per Instance**) | Provider Helm chart (one PodMonitor **for the whole gateway**) |
-| **Toggle (Instance UI)** | **Yes** — Observability → vLLM Prometheus metrics | **No** — cluster-wide; see chart flags below |
-| **Toggle (chart)** | `metrics.podMonitor.enabled` | `aiGateway.enabled` **and** `metrics.podMonitor.enabled` |
+| **Scrape configured by** | The monitoring integration of each destination the Instance lists, from the endpoint the provider publishes in `status.monitoring.sources` | Provider Helm chart (one PodMonitor **for the whole gateway**) |
+| **Toggle (Instance)** | **Yes** — `spec.monitoring.destinations`, and Observability → vLLM metrics | **No** — cluster-wide; see chart flags below |
+| **Toggle (chart)** | — | `aiGateway.enabled` **and** `metrics.podMonitor.enabled` |
 | **Dashboard** | `docs/dashboards/vllm.json` | `docs/dashboards/gateway.json` |
 
 You can deploy three models behind **one** shared AI Gateway. You get **three**
-vLLM PodMonitors (one per model) and **one** gateway PodMonitor (shared front
-door).
+vLLM scrape targets (one per model, for each destination it lists) and **one**
+gateway PodMonitor (shared front door).
 
 ---
 
@@ -42,20 +42,18 @@ door).
 
 ### 1. Chart: `metrics.podMonitor.enabled` (provider Helm)
 
-Master switch for **emitting PodMonitor CRs** at all.
+Switch for the **gateway PodMonitor** only. Default: `true`; skipped when the
+Prometheus Operator CRDs are missing.
 
-- `false` → no vLLM PodMonitors, no gateway PodMonitor
-- `true` → provider *may* create PodMonitors (subject to other rules)
+### 2. Instance: monitoring destinations and **vLLM metrics** (Observability section)
 
-Default: `true`. Safe on clusters without Prometheus Operator (provider skips
-if CRD missing).
+`spec.monitoring.destinations` lists where the model's engine metrics go; the
+**Monitoring** step of the creation wizard edits it. The **vLLM metrics**
+toggle (`enableMetrics`) decides whether the endpoint is published at all.
 
-### 2. Instance UI: **vLLM Prometheus metrics** (Observability section)
-
-Per-model opt-in/out for the **vLLM** PodMonitor only.
-
-- Disabled → provider **deletes** that Instance's PodMonitor → no engine
-  metrics for that model in Grafana
+- No destination → no engine metrics for that model, unless
+  `spec.monitoring.sources.metrics.policy: Always` and your own scraper reads
+  the published endpoint
 - Does **not** affect gateway metrics
 
 ### 3. Chart: `metrics.grafanaDashboards.enabled` (optional dashboards)
@@ -79,7 +77,7 @@ mechanism as prod).
 
 | `ENABLE_METRICS` | `ENABLE_AI_GATEWAY` | What you get locally |
 |------------------|---------------------|----------------------|
-| `false` | any | No Prometheus/Grafana from Tilt; PodMonitors still created if chart allows |
+| `false` | any | No Prometheus/Grafana from Tilt; the gateway PodMonitor is still created if the chart allows |
 | `true` | `false` | Prometheus + Grafana + **vLLM** dashboard ConfigMap |
 | `true` | `true` | Prometheus + Grafana + **both** dashboard ConfigMaps |
 
@@ -101,8 +99,8 @@ separate models in Grafana.
 A per-instance “disable gateway metrics” toggle would lie: disabling it on
 Instance A would not stop scraping traffic for Instance B.
 
-**Design choice:** gateway scrape is **cluster-wide** (chart flags). Instance UI
-only controls **vLLM engine** scrape. See
+**Design choice:** gateway scrape is **cluster-wide** (chart flags). The Instance
+only controls the **vLLM engine** scrape. See
 [adr/0001-cluster-wide-gateway-metrics.md](adr/0001-cluster-wide-gateway-metrics.md).
 
 ---
@@ -120,7 +118,8 @@ make dev-up
 3. Tilt installs kube-prometheus-stack
 4. Provider chart creates dashboard ConfigMaps (vLLM + gateway when AI GW on)
 5. Create an LLM Instance in Everest UI (:8080)
-6. Provider creates vLLM PodMonitor for that Instance (unless disabled in UI)
+6. Install a monitoring integration, create a `MonitoringDestination` and list
+   it on the Instance; the integration scrapes the endpoint the provider publishes
 7. Prometheus scrapes both endpoints → Grafana shows both dashboards
 
 ---
