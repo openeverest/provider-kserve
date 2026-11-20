@@ -1042,13 +1042,13 @@ func ensureModelPullerServiceAccount(c *controller.Context) error {
 func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 	llmisvc := &kservev1alpha2.LLMInferenceService{}
 	if err := c.Get(llmisvc, c.Name()); err != nil {
-		return controller.Provisioning("Waiting for LLMInferenceService"), nil
+		return controller.Progressing("Waiting for LLMInferenceService"), nil
 	}
 
 	ready := llmisvc.Status.GetCondition(apis.ConditionReady)
 	if ready != nil && ready.IsTrue() {
 		if waiting := unservedWorkload(llmisvc.Status.Workloads); waiting != "" {
-			return controller.Provisioning(waiting), nil
+			return controller.Progressing(waiting), nil
 		}
 
 		var topo llm.LlmTopologyParameters
@@ -1065,7 +1065,7 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 				return controller.Status{}, err
 			}
 			if waiting != "" {
-				return controller.Provisioning(waiting), nil
+				return controller.Progressing(waiting), nil
 			}
 			return controller.ReadyWithConnectionDetails(details), nil
 		}
@@ -1074,7 +1074,7 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 		// direct KServe workload URL.
 		details, err := p.llmConnectionDetails(c, llmisvc)
 		if err != nil {
-			return controller.Provisioning(err.Error()), nil
+			return controller.Progressing(err.Error()), nil
 		}
 		if details != nil {
 			return controller.ReadyWithConnectionDetails(*details), nil
@@ -1082,7 +1082,7 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 		return controller.Ready(), nil
 	}
 
-	return controller.Provisioning(conditionMessage(ready, "LLMInferenceService is being created")), nil
+	return controller.Progressing(conditionMessage(ready, "LLMInferenceService is being created")), nil
 }
 
 // unservedWorkload names the first model workload without a ready pod. KServe

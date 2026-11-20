@@ -72,16 +72,19 @@ helm upgrade -i cert-manager jetstack/cert-manager -n cert-manager --create-name
 ```sh
 helm repo add openeverest https://openeverest.github.io/helm-charts/
 helm upgrade -i everest openeverest/openeverest -n everest-system --create-namespace \
-  --devel --version 2.0.0-dev.4 \
+  --devel --version 2.0.0-alpha.1 \
   --set server.initialAdminPassword=<admin-password> \
   --wait
 
 # Helm does not upgrade CRDs on an existing release; re-apply the ones matching the release.
-base=https://raw.githubusercontent.com/openeverest/openeverest/v2.0.0-dev.4/config/crd/bases
+base=https://raw.githubusercontent.com/openeverest/openeverest/v2.0.0-alpha.1/config/crd/bases
 for f in core.openeverest.io_providers core.openeverest.io_instances \
-         core.openeverest.io_instancepresets monitoring.openeverest.io_monitoringconfigs \
+         core.openeverest.io_instancepresets core.openeverest.io_clusterinstancepresets \
+         monitoring.openeverest.io_monitoringclasses monitoring.openeverest.io_monitoringdestinations \
+         monitoring.openeverest.io_monitoringbindings \
          backup.openeverest.io_backupclasses backup.openeverest.io_backups \
-         backup.openeverest.io_restores backup.openeverest.io_backupstorages; do
+         backup.openeverest.io_backupimports backup.openeverest.io_restores \
+         backup.openeverest.io_backupstorageclasses backup.openeverest.io_backupstorages; do
   kubectl apply --server-side --force-conflicts -f $base/$f.yaml
 done
 ```

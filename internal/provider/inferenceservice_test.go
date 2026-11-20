@@ -449,22 +449,20 @@ func TestStatusPredictor(t *testing.T) {
 	}
 
 	cases := []struct {
-		name      string
-		topo      predictor.PredictorTopologyParameters
-		objs      []client.Object
-		wantPhase corev1alpha1.InstancePhase
-		wantURI   string
+		name          string
+		topo          predictor.PredictorTopologyParameters
+		objs          []client.Object
+		wantConverged bool
+		wantURI       string
 	}{
 		{
-			name:      "missing InferenceService is provisioning",
-			wantPhase: corev1alpha1.InstancePhaseProvisioning,
+			name: "missing InferenceService is provisioning",
 		},
 		{
 			name: "not ready is provisioning",
 			objs: []client.Object{isvcWithStatus(map[string]any{
 				"conditions": []any{map[string]any{"type": "Ready", "status": "False", "reason": "MinimumReplicasUnavailable"}},
 			})},
-			wantPhase: corev1alpha1.InstancePhaseProvisioning,
 		},
 		{
 			name: "ready publishes the in-cluster address, not the ingress-domain URL",
@@ -473,19 +471,19 @@ func TestStatusPredictor(t *testing.T) {
 				"url":        "http://iris-ns.example.com",
 				"address":    map[string]any{"url": "http://iris-predictor.ns.svc.cluster.local"},
 			})},
-			wantPhase: corev1alpha1.InstancePhaseReady,
-			wantURI:   "http://iris-predictor.ns.svc.cluster.local",
+			wantConverged: true,
+			wantURI:       "http://iris-predictor.ns.svc.cluster.local",
 		},
 		{
-			name:      "ready without URL falls back to the in-cluster predictor Service",
-			objs:      []client.Object{isvcWithStatus(readyStatus)},
-			wantPhase: corev1alpha1.InstancePhaseReady,
-			wantURI:   "http://iris-predictor.ns.svc.cluster.local:80",
+			name:          "ready without URL falls back to the in-cluster predictor Service",
+			objs:          []client.Object{isvcWithStatus(readyStatus)},
+			wantConverged: true,
+			wantURI:       "http://iris-predictor.ns.svc.cluster.local:80",
 		},
 		{
-			name:      "load balancer publishes its ingress address",
-			topo:      predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessLoadBalancer},
-			wantPhase: corev1alpha1.InstancePhaseReady,
+			name:          "load balancer publishes its ingress address",
+			topo:          predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessLoadBalancer},
+			wantConverged: true,
 			objs: []client.Object{
 				isvcWithStatus(map[string]any{
 					"conditions": []any{map[string]any{"type": "Ready", "status": "True"}},
@@ -498,15 +496,15 @@ func TestStatusPredictor(t *testing.T) {
 			wantURI: "http://198.51.100.7:80",
 		},
 		{
-			name:      "pending load balancer is ready without connection details",
-			topo:      predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessLoadBalancer},
-			objs:      []client.Object{isvcWithStatus(readyStatus), externalService(func(*corev1.Service) {})},
-			wantPhase: corev1alpha1.InstancePhaseReady,
+			name:          "pending load balancer is ready without connection details",
+			topo:          predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessLoadBalancer},
+			objs:          []client.Object{isvcWithStatus(readyStatus), externalService(func(*corev1.Service) {})},
+			wantConverged: true,
 		},
 		{
-			name:      "node port pairs a node address with the allocated port",
-			topo:      predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessNodePort},
-			wantPhase: corev1alpha1.InstancePhaseReady,
+			name:          "node port pairs a node address with the allocated port",
+			topo:          predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessNodePort},
+			wantConverged: true,
 			objs: []client.Object{
 				isvcWithStatus(readyStatus),
 				node,
@@ -526,8 +524,8 @@ func TestStatusPredictor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Phase != tc.wantPhase {
-				t.Fatalf("phase = %q, want %q", got.Phase, tc.wantPhase)
+			if got.Converged != tc.wantConverged {
+				t.Fatalf("converged = %v, want %v (message %q)", got.Converged, tc.wantConverged, got.Message)
 			}
 			if got.ConnectionDetails.URI != tc.wantURI {
 				t.Fatalf("connection details = %+v, want URI %q", got.ConnectionDetails, tc.wantURI)

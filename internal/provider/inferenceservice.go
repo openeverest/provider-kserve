@@ -807,7 +807,7 @@ func predictorAIBackendRef(backendName, instanceName string, params components.M
 func (p *Provider) statusPredictor(c *controller.Context) (controller.Status, error) {
 	isvc := unstructuredObject(inferenceServiceGVK)
 	if err := c.Get(isvc, c.Name()); err != nil {
-		return controller.Provisioning("Waiting for InferenceService"), nil
+		return controller.Progressing("Waiting for InferenceService"), nil
 	}
 
 	var status inferenceServiceStatus
@@ -827,7 +827,7 @@ func (p *Provider) statusPredictor(c *controller.Context) (controller.Status, er
 				return controller.Status{}, err
 			}
 			if waiting != "" {
-				return controller.Provisioning(waiting), nil
+				return controller.Progressing(waiting), nil
 			}
 			return controller.ReadyWithConnectionDetails(details), nil
 		}
@@ -843,9 +843,9 @@ func (p *Provider) statusPredictor(c *controller.Context) (controller.Status, er
 	// A not-ready InferenceService is still progressing, not failed. KServe
 	// drives Ready through False during normal startup (e.g.
 	// MinimumReplicasUnavailable while the storage-initializer downloads the
-	// model), so surface it as Provisioning and let the condition message
-	// explain the current state rather than flipping the Instance to Failed.
-	return controller.Provisioning(conditionMessage(ready, "InferenceService is being created")), nil
+	// model), so report it as progressing and let the condition message
+	// explain the current state rather than reporting a problem.
+	return controller.Progressing(conditionMessage(ready, "InferenceService is being created")), nil
 }
 
 // predictorClientBasePath is the gateway path clients of the predictor use as
