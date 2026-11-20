@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"cmp"
 	"fmt"
 	"strconv"
 	"strings"
@@ -1044,6 +1045,14 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 		return controller.Progressing("Waiting for LLMInferenceService"), nil
 	}
 
+	if presets := llmisvc.Status.GetCondition(kservev1alpha2.PresetsCombined); presets != nil && presets.IsFalse() {
+		s := controller.Progressing(presets.Message)
+		if terminalPresetsReasons[presets.Reason] {
+			return s.WithTerminalProblem(presets.Reason, presets.Message), nil
+		}
+		return s.WithProblem(cmp.Or(presets.Reason, "PresetsNotCombined"), presets.Message), nil
+	}
+
 	ready := llmisvc.Status.GetCondition(apis.ConditionReady)
 	if ready != nil && ready.IsTrue() {
 		if waiting := unservedWorkload(llmisvc.Status.Workloads); waiting != "" {
@@ -1082,6 +1091,15 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 	}
 
 	return controller.Progressing(conditionMessage(ready, "LLMInferenceService is being created")), nil
+}
+
+// terminalPresetsReasons are the PresetsCombined failures that only a change
+// to the Instance resolves: two LoRA adapters on one mount path, or a merged
+// spec the API server rejects. A missing LLMInferenceServiceConfig
+// (ConfigNotFound) clears once the presets are installed.
+var terminalPresetsReasons = map[string]bool{
+	"LoRAMountPathCollision": true,
+	"InvalidRenderedConfig":  true,
 }
 
 // unservedWorkload names the first model workload without a ready pod. KServe

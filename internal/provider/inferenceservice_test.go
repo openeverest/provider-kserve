@@ -454,6 +454,7 @@ func TestStatusPredictor(t *testing.T) {
 		objs          []client.Object
 		wantConverged bool
 		wantURI       string
+		wantProblem   *controller.Problem
 	}{
 		{
 			name: "missing InferenceService is provisioning",
@@ -463,6 +464,36 @@ func TestStatusPredictor(t *testing.T) {
 			objs: []client.Object{isvcWithStatus(map[string]any{
 				"conditions": []any{map[string]any{"type": "Ready", "status": "False", "reason": "MinimumReplicasUnavailable"}},
 			})},
+		},
+		{
+			name: "a model that fails to load is a problem",
+			objs: []client.Object{isvcWithStatus(map[string]any{
+				"conditions": []any{map[string]any{"type": "Ready", "status": "False"}},
+				"modelStatus": map[string]any{
+					"transitionStatus": "BlockedByFailedLoad",
+					"lastFailureInfo":  map[string]any{"reason": "ModelLoadFailed", "message": "storage-initializer: 403 Forbidden"},
+				},
+			})},
+			wantProblem: &controller.Problem{Reason: "ModelLoadFailed", Message: "storage-initializer: 403 Forbidden"},
+		},
+		{
+			name: "a failed load of a new revision keeps the Instance unconverged while the old one serves",
+			objs: []client.Object{isvcWithStatus(map[string]any{
+				"conditions":  []any{map[string]any{"type": "Ready", "status": "True"}},
+				"modelStatus": map[string]any{"transitionStatus": "BlockedByFailedLoad"},
+			})},
+			wantProblem: &controller.Problem{Reason: "ModelLoadFailed", Message: "the model failed to load"},
+		},
+		{
+			name: "an invalid spec is a terminal problem",
+			objs: []client.Object{isvcWithStatus(map[string]any{
+				"conditions": []any{map[string]any{"type": "Ready", "status": "False"}},
+				"modelStatus": map[string]any{
+					"transitionStatus": "InvalidSpec",
+					"lastFailureInfo":  map[string]any{"reason": "NoSupportingRuntime", "message": "no runtime supports the model format"},
+				},
+			})},
+			wantProblem: &controller.Problem{Reason: "NoSupportingRuntime", Message: "no runtime supports the model format", Terminal: true},
 		},
 		{
 			name: "ready publishes the in-cluster address, not the ingress-domain URL",
@@ -526,6 +557,13 @@ func TestStatusPredictor(t *testing.T) {
 			}
 			if got.Converged != tc.wantConverged {
 				t.Fatalf("converged = %v, want %v (message %q)", got.Converged, tc.wantConverged, got.Message)
+			}
+			if tc.wantProblem == nil {
+				if len(got.Problems) != 0 {
+					t.Fatalf("problems = %+v, want none", got.Problems)
+				}
+			} else if len(got.Problems) != 1 || got.Problems[0] != *tc.wantProblem {
+				t.Fatalf("problems = %+v, want %+v", got.Problems, *tc.wantProblem)
 			}
 			if got.ConnectionDetails.URI != tc.wantURI {
 				t.Fatalf("connection details = %+v, want URI %q", got.ConnectionDetails, tc.wantURI)

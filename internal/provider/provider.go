@@ -83,7 +83,8 @@ func (p *Provider) Status(c *controller.Context) (controller.Status, error) {
 	case common.TopologyPredictor:
 		return p.statusPredictor(c)
 	default:
-		return controller.Failed(fmt.Sprintf("unsupported topology %q", c.Instance().GetTopologyType())), nil
+		msg := fmt.Sprintf("unsupported topology %q", c.Instance().GetTopologyType())
+		return controller.Progressing(msg).WithTerminalProblem("UnsupportedTopology", msg), nil
 	}
 }
 

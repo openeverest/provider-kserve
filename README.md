@@ -1106,6 +1106,24 @@ many managed GPU node pools) so that only GPU workloads land on them. GPU `llm` 
 pods tolerate the taint named after each GPU resource they request, so they schedule there
 without extra settings; other tolerations come from `schedulingPolicy`.
 
+### Instance status
+
+The provider reports facts, and OpenEverest turns them into the Instance's `Ready`, `Available`
+and `Stalled` conditions:
+
+- **Converged** (`Ready`) once KServe reports the `InferenceService` or `LLMInferenceService`
+  ready, every model workload has a ready pod, and, with the AI Gateway, the gateway has an
+  address. Until then the message says what is awaited, in KServe's words where it has any.
+- **Problems**, under KServe's own reasons:
+  - `predictor`: a model that fails to load (`BlockedByFailedLoad`, for example
+    `ModelLoadFailed` or `RuntimeUnhealthy`), and, as terminal, a spec KServe rejects
+    (`InvalidSpec`, for example `NoSupportingRuntime` or `InvalidPredictorSpec`);
+  - `llm`: `PresetsCombined=False`. `LoRAMountPathCollision` and `InvalidRenderedConfig` are
+    terminal; others, such as `ConfigNotFound` before the LLM presets are installed, are not.
+
+`Available` is left to OpenEverest: `True` once converged, never guessed from KServe's model
+states.
+
 ### Observability
 
 Metrics are collected through OpenEverest's monitoring integrations. Install one (for example
