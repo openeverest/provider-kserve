@@ -1,0 +1,11 @@
+# The PodMonitor releases before the monitoring contract created per Instance.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: test-predictor-metrics-metrics
+spec:
+  selector:
+    matchLabels:
+      core.openeverest.io/instance: test-predictor-metrics
+  podMetricsEndpoints:
+    - path: /metrics

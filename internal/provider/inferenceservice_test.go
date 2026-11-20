@@ -449,22 +449,51 @@ func TestStatusPredictor(t *testing.T) {
 	}
 
 	cases := []struct {
-		name      string
-		topo      predictor.PredictorTopologyParameters
-		objs      []client.Object
-		wantPhase corev1alpha1.InstancePhase
-		wantURI   string
+		name          string
+		topo          predictor.PredictorTopologyParameters
+		objs          []client.Object
+		wantConverged bool
+		wantURI       string
+		wantProblem   *controller.Problem
 	}{
 		{
-			name:      "missing InferenceService is provisioning",
-			wantPhase: corev1alpha1.InstancePhaseProvisioning,
+			name: "missing InferenceService is provisioning",
 		},
 		{
 			name: "not ready is provisioning",
 			objs: []client.Object{isvcWithStatus(map[string]any{
 				"conditions": []any{map[string]any{"type": "Ready", "status": "False", "reason": "MinimumReplicasUnavailable"}},
 			})},
-			wantPhase: corev1alpha1.InstancePhaseProvisioning,
+		},
+		{
+			name: "a model that fails to load is a problem",
+			objs: []client.Object{isvcWithStatus(map[string]any{
+				"conditions": []any{map[string]any{"type": "Ready", "status": "False"}},
+				"modelStatus": map[string]any{
+					"transitionStatus": "BlockedByFailedLoad",
+					"lastFailureInfo":  map[string]any{"reason": "ModelLoadFailed", "message": "storage-initializer: 403 Forbidden"},
+				},
+			})},
+			wantProblem: &controller.Problem{Reason: "ModelLoadFailed", Message: "storage-initializer: 403 Forbidden"},
+		},
+		{
+			name: "a failed load of a new revision keeps the Instance unconverged while the old one serves",
+			objs: []client.Object{isvcWithStatus(map[string]any{
+				"conditions":  []any{map[string]any{"type": "Ready", "status": "True"}},
+				"modelStatus": map[string]any{"transitionStatus": "BlockedByFailedLoad"},
+			})},
+			wantProblem: &controller.Problem{Reason: "ModelLoadFailed", Message: "the model failed to load"},
+		},
+		{
+			name: "an invalid spec is a terminal problem",
+			objs: []client.Object{isvcWithStatus(map[string]any{
+				"conditions": []any{map[string]any{"type": "Ready", "status": "False"}},
+				"modelStatus": map[string]any{
+					"transitionStatus": "InvalidSpec",
+					"lastFailureInfo":  map[string]any{"reason": "NoSupportingRuntime", "message": "no runtime supports the model format"},
+				},
+			})},
+			wantProblem: &controller.Problem{Reason: "NoSupportingRuntime", Message: "no runtime supports the model format", Terminal: true},
 		},
 		{
 			name: "ready publishes the in-cluster address, not the ingress-domain URL",
@@ -473,19 +502,19 @@ func TestStatusPredictor(t *testing.T) {
 				"url":        "http://iris-ns.example.com",
 				"address":    map[string]any{"url": "http://iris-predictor.ns.svc.cluster.local"},
 			})},
-			wantPhase: corev1alpha1.InstancePhaseReady,
-			wantURI:   "http://iris-predictor.ns.svc.cluster.local",
+			wantConverged: true,
+			wantURI:       "http://iris-predictor.ns.svc.cluster.local",
 		},
 		{
-			name:      "ready without URL falls back to the in-cluster predictor Service",
-			objs:      []client.Object{isvcWithStatus(readyStatus)},
-			wantPhase: corev1alpha1.InstancePhaseReady,
-			wantURI:   "http://iris-predictor.ns.svc.cluster.local:80",
+			name:          "ready without URL falls back to the in-cluster predictor Service",
+			objs:          []client.Object{isvcWithStatus(readyStatus)},
+			wantConverged: true,
+			wantURI:       "http://iris-predictor.ns.svc.cluster.local:80",
 		},
 		{
-			name:      "load balancer publishes its ingress address",
-			topo:      predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessLoadBalancer},
-			wantPhase: corev1alpha1.InstancePhaseReady,
+			name:          "load balancer publishes its ingress address",
+			topo:          predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessLoadBalancer},
+			wantConverged: true,
 			objs: []client.Object{
 				isvcWithStatus(map[string]any{
 					"conditions": []any{map[string]any{"type": "Ready", "status": "True"}},
@@ -498,15 +527,15 @@ func TestStatusPredictor(t *testing.T) {
 			wantURI: "http://198.51.100.7:80",
 		},
 		{
-			name:      "pending load balancer is ready without connection details",
-			topo:      predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessLoadBalancer},
-			objs:      []client.Object{isvcWithStatus(readyStatus), externalService(func(*corev1.Service) {})},
-			wantPhase: corev1alpha1.InstancePhaseReady,
+			name:          "pending load balancer is ready without connection details",
+			topo:          predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessLoadBalancer},
+			objs:          []client.Object{isvcWithStatus(readyStatus), externalService(func(*corev1.Service) {})},
+			wantConverged: true,
 		},
 		{
-			name:      "node port pairs a node address with the allocated port",
-			topo:      predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessNodePort},
-			wantPhase: corev1alpha1.InstancePhaseReady,
+			name:          "node port pairs a node address with the allocated port",
+			topo:          predictor.PredictorTopologyParameters{ExternalAccess: predictor.ExternalAccessNodePort},
+			wantConverged: true,
 			objs: []client.Object{
 				isvcWithStatus(readyStatus),
 				node,
@@ -526,8 +555,15 @@ func TestStatusPredictor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Phase != tc.wantPhase {
-				t.Fatalf("phase = %q, want %q", got.Phase, tc.wantPhase)
+			if got.Converged != tc.wantConverged {
+				t.Fatalf("converged = %v, want %v (message %q)", got.Converged, tc.wantConverged, got.Message)
+			}
+			if tc.wantProblem == nil {
+				if len(got.Problems) != 0 {
+					t.Fatalf("problems = %+v, want none", got.Problems)
+				}
+			} else if len(got.Problems) != 1 || got.Problems[0] != *tc.wantProblem {
+				t.Fatalf("problems = %+v, want %+v", got.Problems, *tc.wantProblem)
 			}
 			if got.ConnectionDetails.URI != tc.wantURI {
 				t.Fatalf("connection details = %+v, want URI %q", got.ConnectionDetails, tc.wantURI)

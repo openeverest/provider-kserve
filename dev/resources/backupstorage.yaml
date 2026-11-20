@@ -19,11 +19,18 @@ metadata:
   name: seaweedfs-s3
   namespace: __NAMESPACE__
 spec:
-  type: s3
-  s3:
-    bucket: backups
+  backupStorageClassRef:
+    name: s3
+  location:
+    objectStore:
+      bucket: backups
+  parameters:
     region: us-east-1
+    # http:// means plain HTTP, so no TLS settings are needed.
     endpointURL: http://seaweedfs.seaweedfs.svc.cluster.local
     forcePathStyle: true
-    verifyTLS: false
-    credentialsSecretName: seaweedfs-credentials
+    implementation: other
+  authentication:
+    mode: AccessKey
+    credentialsSecretRef:
+      name: seaweedfs-credentials

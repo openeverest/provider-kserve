@@ -39,10 +39,6 @@ func New() *Provider {
 			controller.WatchOwned(&corev1.Secret{}, predicate.NewPredicateFuncs(isAIGatewayKeySecret)),
 		)
 	}
-	// Note: the PodMonitor is intentionally NOT watched. Owning a watch on
-	// monitoring.coreos.com/PodMonitor would fail the manager at startup on any
-	// cluster without the Prometheus Operator CRDs. Since metrics default on, we
-	// keep the emit-only path and let the periodic resync re-apply on drift.
 
 	return &Provider{
 		BaseProvider: controller.BaseProvider{
@@ -87,7 +83,8 @@ func (p *Provider) Status(c *controller.Context) (controller.Status, error) {
 	case common.TopologyPredictor:
 		return p.statusPredictor(c)
 	default:
-		return controller.Failed(fmt.Sprintf("unsupported topology %q", c.Instance().GetTopologyType())), nil
+		msg := fmt.Sprintf("unsupported topology %q", c.Instance().GetTopologyType())
+		return controller.Progressing(msg).WithTerminalProblem("UnsupportedTopology", msg), nil
 	}
 }
 

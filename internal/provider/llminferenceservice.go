@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"cmp"
 	"fmt"
 	"strconv"
 	"strings"
@@ -933,8 +934,7 @@ func (p *Provider) syncLLM(c *controller.Context) error {
 	var topo llm.LlmTopologyParameters
 	c.TryDecodeTopologyParameters(&topo)
 
-	// Per-instance vLLM PodMonitor (guarded by chart + instance flags).
-	if err := syncPodMonitor(c, topo.MetricsEnabled(), buildPodMonitor(c.Name(), c.Instance().Namespace, workloadPodSelector(c.Name()), vllmServingPort, "/metrics", common.PodMonitorInterval())); err != nil {
+	if err := deleteLegacyPodMonitor(c); err != nil {
 		return err
 	}
 
@@ -1042,13 +1042,21 @@ func ensureModelPullerServiceAccount(c *controller.Context) error {
 func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 	llmisvc := &kservev1alpha2.LLMInferenceService{}
 	if err := c.Get(llmisvc, c.Name()); err != nil {
-		return controller.Provisioning("Waiting for LLMInferenceService"), nil
+		return controller.Progressing("Waiting for LLMInferenceService"), nil
+	}
+
+	if presets := llmisvc.Status.GetCondition(kservev1alpha2.PresetsCombined); presets != nil && presets.IsFalse() {
+		s := controller.Progressing(presets.Message)
+		if terminalPresetsReasons[presets.Reason] {
+			return s.WithTerminalProblem(presets.Reason, presets.Message), nil
+		}
+		return s.WithProblem(cmp.Or(presets.Reason, "PresetsNotCombined"), presets.Message), nil
 	}
 
 	ready := llmisvc.Status.GetCondition(apis.ConditionReady)
 	if ready != nil && ready.IsTrue() {
 		if waiting := unservedWorkload(llmisvc.Status.Workloads); waiting != "" {
-			return controller.Provisioning(waiting), nil
+			return controller.Progressing(waiting), nil
 		}
 
 		var topo llm.LlmTopologyParameters
@@ -1065,7 +1073,7 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 				return controller.Status{}, err
 			}
 			if waiting != "" {
-				return controller.Provisioning(waiting), nil
+				return controller.Progressing(waiting), nil
 			}
 			return controller.ReadyWithConnectionDetails(details), nil
 		}
@@ -1074,7 +1082,7 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 		// direct KServe workload URL.
 		details, err := p.llmConnectionDetails(c, llmisvc)
 		if err != nil {
-			return controller.Provisioning(err.Error()), nil
+			return controller.Progressing(err.Error()), nil
 		}
 		if details != nil {
 			return controller.ReadyWithConnectionDetails(*details), nil
@@ -1082,7 +1090,16 @@ func (p *Provider) statusLLM(c *controller.Context) (controller.Status, error) {
 		return controller.Ready(), nil
 	}
 
-	return controller.Provisioning(conditionMessage(ready, "LLMInferenceService is being created")), nil
+	return controller.Progressing(conditionMessage(ready, "LLMInferenceService is being created")), nil
+}
+
+// terminalPresetsReasons are the PresetsCombined failures that only a change
+// to the Instance resolves: two LoRA adapters on one mount path, or a merged
+// spec the API server rejects. A missing LLMInferenceServiceConfig
+// (ConfigNotFound) clears once the presets are installed.
+var terminalPresetsReasons = map[string]bool{
+	"LoRAMountPathCollision": true,
+	"InvalidRenderedConfig":  true,
 }
 
 // unservedWorkload names the first model workload without a ready pod. KServe

@@ -4,11 +4,13 @@ spec:
   componentTypes:
     modelServer:
       defaultVersion: 0.21.0
+      kind: kserve-model-server
       versions:
         - image: kserve/kserve-controller:v0.21.0
           version: 0.21.0
     vllm:
       defaultVersion: 0.26.0
+      kind: vllm
       versions:
         - image: ghcr.io/llm-d/llm-d-cuda:v0.9.0
           version: 0.26.0
@@ -1030,8 +1032,14 @@ spec:
           type: object
       type: modelServer
   defaultVersion: "0.21"
+  monitoring:
+    componentTypes:
+      modelServer:
+        metrics: Native
+      vllm:
+        metrics: Native
   release:
-    version: 0.1.0
+    version: 0.6.0
   topologies:
     llm:
       components:
@@ -1058,8 +1066,9 @@ spec:
               type: boolean
             enableMetrics:
               description: |-
-                EnableMetrics emits a Prometheus Operator PodMonitor for this instance's
-                vLLM pods (/metrics). Nil/unset defaults to true for backward compatibility.
+                EnableMetrics publishes vLLM's /metrics endpoint in
+                status.monitoring.sources, for the monitoring destinations the Instance
+                lists. Nil/unset defaults to true.
               type: boolean
             enablePrefill:
               description: |-
@@ -1208,8 +1217,9 @@ spec:
           properties:
             enableMetrics:
               description: |-
-                EnableMetrics emits a Prometheus Operator PodMonitor for the predictor
-                pods. Unset means enabled, as for the llm topology.
+                EnableMetrics publishes the model server's metrics endpoint in
+                status.monitoring.sources. Unset means enabled, as for the llm topology;
+                turn it off for a custom container without a Prometheus endpoint.
               type: boolean
             externalAccess:
               description: |-
@@ -1759,8 +1769,8 @@ spec:
             enableMetrics:
               fieldParams:
                 defaultValue: true
-                helperText: Emits a PodMonitor for this instance's vLLM /metrics endpoint. Requires Prometheus Operator in the cluster.
-                label: vLLM Prometheus metrics
+                helperText: Publishes this instance's vLLM /metrics endpoint to the monitoring destinations it lists.
+                label: vLLM metrics
               path: spec.topology.parameters.enableMetrics
               uiType: toggle
             enableTracing:
@@ -1781,7 +1791,7 @@ spec:
             - enableMetrics
             - enableTracing
             - tracingEndpoint
-          description: 'Configure Prometheus metrics for this model''s vLLM engine (per-instance PodMonitor). Envoy AI Gateway gen_ai metrics are cluster-wide: enabled automatically when the provider is installed with aiGateway.enabled and metrics.podMonitor.enabled — view them in Grafana (gateway dashboard).'
+          description: 'Configure metrics for this model''s vLLM engine, collected by the monitoring destinations the instance lists. Envoy AI Gateway gen_ai metrics are cluster-wide: enabled automatically when the provider is installed with aiGateway.enabled and metrics.podMonitor.enabled — view them in Grafana (gateway dashboard).'
           label: Observability
         routing:
           components:
@@ -2289,8 +2299,8 @@ spec:
             enableMetrics:
               fieldParams:
                 defaultValue: true
-                helperText: Emits a PodMonitor for the model server's metrics endpoint. Requires the Prometheus Operator in the cluster.
-                label: Prometheus metrics
+                helperText: Publishes the model server's metrics endpoint to the monitoring destinations this instance lists. Turn off for a custom container without a Prometheus endpoint.
+                label: Model server metrics
               path: spec.topology.parameters.enableMetrics
               uiType: toggle
           componentsOrder:

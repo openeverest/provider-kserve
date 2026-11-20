@@ -13,6 +13,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
+	"knative.dev/pkg/apis"
+	duckv1 "knative.dev/pkg/apis/duck/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	kservev1alpha2 "github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
 
@@ -1042,6 +1045,41 @@ func TestUnservedWorkload(t *testing.T) {
 			t.Parallel()
 			if got := unservedWorkload(tt.ws); got != tt.want {
 				t.Fatalf("unservedWorkload() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStatusLLMPresetsNotCombined(t *testing.T) {
+	cases := []struct {
+		reason string
+		want   controller.Problem
+	}{
+		{"ConfigNotFound", controller.Problem{Reason: "ConfigNotFound", Message: "msg"}},
+		{"LoRAMountPathCollision", controller.Problem{Reason: "LoRAMountPathCollision", Message: "msg", Terminal: true}},
+		{"", controller.Problem{Reason: "PresetsNotCombined", Message: "msg"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.reason, func(t *testing.T) {
+			llmisvc := &kservev1alpha2.LLMInferenceService{ObjectMeta: metav1.ObjectMeta{Name: "llama", Namespace: "ns"}}
+			llmisvc.Status.Conditions = duckv1.Conditions{
+				{Type: kservev1alpha2.PresetsCombined, Status: corev1.ConditionFalse, Reason: tc.reason, Message: "msg"},
+				{Type: apis.ConditionReady, Status: corev1.ConditionFalse},
+			}
+			scheme := testScheme(t)
+			if err := kservev1alpha2.AddToScheme(scheme); err != nil {
+				t.Fatal(err)
+			}
+			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(llmisvc).WithStatusSubresource(llmisvc).Build()
+			c := llmContext(t, nil, components.VllmCustomSpec{}, llm.LlmTopologyParameters{})
+			c = controller.NewContext(context.Background(), cl, c.Instance(), common.ProviderName)
+
+			got, err := (&Provider{}).statusLLM(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Converged || len(got.Problems) != 1 || got.Problems[0] != tc.want {
+				t.Fatalf("status = %+v, want problem %+v", got, tc.want)
 			}
 		})
 	}

@@ -1,0 +1,16 @@
+# Monitoring contract, published by `provider-sdk generate` as
+# Provider.spec.monitoring.
+#
+# componentTypes: what each component type from provider.yaml exposes (its
+# kind is declared in provider.yaml). vLLM serves OpenMetrics on its serving
+# port (8000, /metrics); a predictor's model server serves them on the port and
+# path its ServingRuntime declares (prometheus.kserve.io/port and /path). No
+# exporter is switched on or off, and there are no operator-native
+# integrations: monitoring extensions scrape the endpoints the provider
+# publishes in Instance.status.monitoring.sources.
+
+componentTypes:
+  vllm:
+    metrics: Native
+  modelServer:
+    metrics: Native

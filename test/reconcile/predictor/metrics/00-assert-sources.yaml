@@ -1,0 +1,16 @@
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-predictor-metrics
+status:
+  monitoring:
+    sources:
+      metrics:
+        - component: predictor
+          kind: kserve-model-server
+          podSelector:
+            core.openeverest.io/instance: test-predictor-metrics
+            core.openeverest.io/component: predictor
+          port: 8080
+          path: /metrics
+          scheme: http

@@ -22,6 +22,12 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - namespaces
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
   - secrets
   - serviceaccounts
   - services
@@ -133,13 +139,23 @@ rules:
   resources:
   - podmonitors
   verbs:
-  - create
   - delete
+- apiGroups:
+  - monitoring.openeverest.io
+  resources:
+  - monitoringbindings
+  - monitoringclasses
+  - monitoringdestinations
+  verbs:
   - get
   - list
-  - patch
-  - update
   - watch
+- apiGroups:
+  - monitoring.openeverest.io
+  resources:
+  - monitoringbindings/status
+  verbs:
+  - patch
 - apiGroups:
   - serving.kserve.io
   resources:

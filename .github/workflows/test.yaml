@@ -55,7 +55,7 @@ jobs:
       # provider chart (which brings the KServe CRDs and controllers with it).
       #
       # This provider's chart is not standalone — it needs the OpenEverest core
-      # CRDs (Provider, Instance, InstancePreset) and cert-manager to exist
+      # CRDs (Provider, Instance, ClusterInstancePreset) and cert-manager to exist
       # first — so `helm install` on a bare cluster cannot work. The Tiltfile is
       # the single source of truth for that bootstrap order, shared with the
       # local dev loop, which keeps CI and `make dev-up` from drifting apart.

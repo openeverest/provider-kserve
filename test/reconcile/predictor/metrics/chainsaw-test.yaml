@@ -4,16 +4,18 @@ metadata:
   name: predictor-metrics
 spec:
   description: |
-    topology.parameters.enableMetrics (on by default) emits a PodMonitor for
-    the predictor pods that scrapes the port and path the serving runtime
-    declares in its prometheus.kserve.io annotations; turning it off removes
-    the PodMonitor.
+    topology.parameters.enableMetrics (on by default) publishes the metrics
+    endpoint the serving runtime declares in its prometheus.kserve.io
+    annotations in status.monitoring.sources, read from a predictor pod;
+    turning it off clears it. The PodMonitor earlier releases created per
+    Instance is deleted.
 
     The PodMonitor CRD is installed if the cluster does not have it yet (the
-    Tilt CI cluster runs without the Prometheus Operator).
+    Tilt CI cluster runs without the Prometheus Operator), so the legacy
+    PodMonitor can be created.
   catch:
     - script:
-        content: kubectl -n $NAMESPACE get instance,inferenceservice,podmonitor -o yaml
+        content: kubectl -n $NAMESPACE get instance,inferenceservice,podmonitor,pod -o yaml
   steps:
     - name: podmonitor-crd
       try:
@@ -32,13 +34,17 @@ spec:
     - name: enabled-by-default
       try:
         - apply:
+            file: 00-legacy-podmonitor.yaml
+        - apply:
             file: 00-instance.yaml
         - assert:
-            file: 00-assert-podmonitor.yaml
+            file: 00-assert-sources.yaml
+        - error:
+            file: 00-errors-legacy-podmonitor.yaml
 
     - name: disabled
       try:
         - apply:
             file: 10-instance-disabled.yaml
-        - error:
-            file: 10-errors.yaml
+        - assert:
+            file: 10-assert-no-sources.yaml

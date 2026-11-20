@@ -105,10 +105,11 @@ provider:
   # used in other contexts where a short concise provider identifier is needed.
   shortName: kserve
 
-# -- Default instance presets configuration
-# Each preset must have 'name', 'enabled', and 'spec' fields.
-# The 'spec' field contains the full InstancePresetSpec.
-# Note: The provider shortName will be automatically added to each preset name.
+# -- ClusterInstancePresets installed with the provider: starting points users
+# pick when they create an Instance in any namespace. Each entry has a 'name'
+# (prefixed with provider.shortName), 'enabled', and a 'spec' (an Instance spec;
+# providerRef is set by the chart). Presets are cluster-scoped, so a spec must
+# not reference namespaced objects such as Secrets.
 presets:
   # smollm-cpu — a tiny, ungated model on CPU-only nodes. Sized for local
   # development and smoke tests (k3d/kind/minikube): no GPU required, and the
@@ -116,8 +117,6 @@ presets:
   - name: smollm-cpu
     enabled: true
     spec:
-      providerRef:
-        name: provider-kserve
       topology:
         type: llm
       components:
@@ -148,8 +147,6 @@ presets:
   - name: qwen-gpu
     enabled: true
     spec:
-      providerRef:
-        name: provider-kserve
       topology:
         type: llm
       components:
@@ -367,18 +364,17 @@ storageInitializer:
     limits:
       memory: 4Gi
 
-# Prometheus Operator metrics scraping. The provider ships no monitoring stack;
-# it only makes model workloads discoverable by an existing Prometheus Operator.
+# Metrics scraping. The provider ships no monitoring stack. Model metrics are
+# published per Instance through the monitoring contract and scraped by the
+# monitoring integration of the destinations the Instance lists; see
+# docs/observability.md.
 metrics:
   podMonitor:
-    # -- Emit a PodMonitor per Instance so an existing Prometheus Operator
-    # scrapes the model /metrics endpoint. Safe to leave on: if the
-    # monitoring.coreos.com CRDs are absent the provider skips it instead of
-    # erroring. To actually collect metrics, a Prometheus must select this
-    # PodMonitor (podMonitorSelector/namespaceSelector matching the Instance
-    # namespace). See docs/observability.md.
+    # -- Emit a PodMonitor for the Envoy AI Gateway's gen_ai metrics (with
+    # aiGateway.enabled) so an existing Prometheus Operator scrapes them.
+    # Skipped when the monitoring.coreos.com CRDs are absent.
     enabled: true
-    # -- Scrape interval for the generated PodMonitor
+    # -- Scrape interval for the AI Gateway PodMonitor
     interval: 30s
   grafanaDashboards:
     # -- Create ConfigMaps labeled for kube-prometheus-stack's Grafana dashboard

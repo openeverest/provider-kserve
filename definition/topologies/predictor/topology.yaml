@@ -381,11 +381,12 @@ ui:
           uiType: toggle
           path: spec.topology.parameters.enableMetrics
           fieldParams:
-            label: Prometheus metrics
+            label: Model server metrics
             defaultValue: true
             helperText: >-
-              Emits a PodMonitor for the model server's metrics endpoint.
-              Requires the Prometheus Operator in the cluster.
+              Publishes the model server's metrics endpoint to the monitoring
+              destinations this instance lists. Turn off for a custom container
+              without a Prometheus endpoint.
       componentsOrder:
       - enableMetrics
     advanced:

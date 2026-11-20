@@ -81,7 +81,26 @@ type modelFormat struct {
 type inferenceServiceStatus struct {
 	duckv1.Status `json:",inline"`
 	Address       *duckv1.Addressable `json:"address,omitempty"`
+	ModelStatus   *modelStatus        `json:"modelStatus,omitempty"`
 }
+
+// modelStatus mirrors the fields of KServe's v1beta1 ModelStatus that name a
+// failure.
+type modelStatus struct {
+	TransitionStatus string       `json:"transitionStatus,omitempty"`
+	LastFailureInfo  *failureInfo `json:"lastFailureInfo,omitempty"`
+}
+
+type failureInfo struct {
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// KServe's ModelStatus.TransitionStatus values that report a failure.
+const (
+	transitionBlockedByFailedLoad = "BlockedByFailedLoad"
+	transitionInvalidSpec         = "InvalidSpec"
+)
 
 const (
 	// predictorServicePort is the port of KServe's in-cluster predictor Service
@@ -456,7 +475,7 @@ func buildInferenceService(c *controller.Context) (*unstructured.Unstructured, e
 	meta.Labels = mergeMaps(params.Labels, meta.Labels)
 	annotations := params.Annotations
 	if params.UsesCustomContainer() {
-		// The PodMonitor reads the metrics endpoint from these; a serving
+		// The published metrics endpoint is read from these; a serving
 		// runtime would set them, a custom image has none.
 		annotations = mergeMaps(map[string]string{
 			metricsPortAnnotation: strconv.Itoa(int(params.ContainerPort())),
@@ -692,7 +711,7 @@ func (p *Provider) syncPredictor(c *controller.Context) error {
 	}
 	var topo predictor.PredictorTopologyParameters
 	c.TryDecodeTopologyParameters(&topo)
-	if err := syncPodMonitor(c, topo.MetricsEnabled(), buildPredictorPodMonitor(c.Name(), c.Instance().Namespace, c.PodLabels(common.ComponentPredictor), common.PodMonitorInterval())); err != nil {
+	if err := deleteLegacyPodMonitor(c); err != nil {
 		return err
 	}
 	if err := syncPredictorAIGateway(c, topo, params); err != nil {
@@ -807,7 +826,7 @@ func predictorAIBackendRef(backendName, instanceName string, params components.M
 func (p *Provider) statusPredictor(c *controller.Context) (controller.Status, error) {
 	isvc := unstructuredObject(inferenceServiceGVK)
 	if err := c.Get(isvc, c.Name()); err != nil {
-		return controller.Provisioning("Waiting for InferenceService"), nil
+		return controller.Progressing("Waiting for InferenceService"), nil
 	}
 
 	var status inferenceServiceStatus
@@ -818,6 +837,13 @@ func (p *Provider) statusPredictor(c *controller.Context) (controller.Status, er
 	}
 
 	ready := status.GetCondition(apis.ConditionReady)
+	if problem, terminal, ok := predictorProblem(status); ok {
+		s := controller.Progressing(problem.Message)
+		if terminal {
+			return s.WithTerminalProblem(problem.Reason, problem.Message), nil
+		}
+		return s.WithProblem(problem.Reason, problem.Message), nil
+	}
 	if ready != nil && ready.IsTrue() {
 		var topo predictor.PredictorTopologyParameters
 		c.TryDecodeTopologyParameters(&topo)
@@ -827,7 +853,7 @@ func (p *Provider) statusPredictor(c *controller.Context) (controller.Status, er
 				return controller.Status{}, err
 			}
 			if waiting != "" {
-				return controller.Provisioning(waiting), nil
+				return controller.Progressing(waiting), nil
 			}
 			return controller.ReadyWithConnectionDetails(details), nil
 		}
@@ -843,9 +869,39 @@ func (p *Provider) statusPredictor(c *controller.Context) (controller.Status, er
 	// A not-ready InferenceService is still progressing, not failed. KServe
 	// drives Ready through False during normal startup (e.g.
 	// MinimumReplicasUnavailable while the storage-initializer downloads the
-	// model), so surface it as Provisioning and let the condition message
-	// explain the current state rather than flipping the Instance to Failed.
-	return controller.Provisioning(conditionMessage(ready, "InferenceService is being created")), nil
+	// model), so report it as progressing and let the condition message
+	// explain the current state rather than reporting a problem.
+	return controller.Progressing(conditionMessage(ready, "InferenceService is being created")), nil
+}
+
+// predictorProblem names the failure KServe reports for the latest predictor
+// revision. An invalid spec (no runtime supports the model format, an invalid
+// predictor spec) needs the Instance changed, so it is terminal; a model that
+// failed to load can be a transient download or runtime error.
+func predictorProblem(status inferenceServiceStatus) (failureInfo, bool, bool) {
+	ms := status.ModelStatus
+	if ms == nil {
+		return failureInfo{}, false, false
+	}
+	var terminal bool
+	problem := failureInfo{Reason: "ModelLoadFailed", Message: "the model failed to load"}
+	switch ms.TransitionStatus {
+	case transitionInvalidSpec:
+		terminal = true
+		problem = failureInfo{Reason: "InvalidPredictorSpec", Message: "KServe rejects the predictor spec"}
+	case transitionBlockedByFailedLoad:
+	default:
+		return failureInfo{}, false, false
+	}
+	if info := ms.LastFailureInfo; info != nil {
+		if info.Reason != "" {
+			problem.Reason = info.Reason
+		}
+		if info.Message != "" {
+			problem.Message = info.Message
+		}
+	}
+	return problem, terminal, true
 }
 
 // predictorClientBasePath is the gateway path clients of the predictor use as

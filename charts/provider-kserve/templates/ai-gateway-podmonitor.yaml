@@ -5,11 +5,11 @@ per-route token usage, TTFT, TPOT, and request duration. These are the
 token/cost signals no single vLLM pod can give you (each model pod only sees its
 own traffic; the gateway sees every request that entered the system).
 
-Unlike the per-Instance vLLM PodMonitor (emitted by the provider in Go, one per
-llm Instance), the AI Gateway is a *singleton* installed once by this chart, so
-its monitor is rendered once here, next to the Gateway itself. Gated by
-aiGateway.enabled AND metrics.podMonitor.enabled so the single metrics switch
-turns everything off together and this never appears without a gateway.
+Unlike the per-Instance vLLM metrics (published through the monitoring contract
+and scraped by the Instance's monitoring destinations), the AI Gateway is a
+*singleton* installed once by this chart, so its monitor is rendered once here,
+next to the Gateway itself. Gated by aiGateway.enabled AND
+metrics.podMonitor.enabled so it never appears without a gateway.
 
 The gen_ai.* metrics live on the Envoy proxy data-plane pods on a container port
 named "aigw-admin" at /metrics — NOT behind a Service, which is why this is a

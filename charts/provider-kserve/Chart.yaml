@@ -2,8 +2,8 @@ apiVersion: v2
 name: provider-kserve
 description: A Helm chart for deploying the OpenEverest provider-kserve provider
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.6.0
+appVersion: "0.6.0"
 keywords:
   - openeverest
   - provider
@@ -78,4 +78,3 @@ dependencies:
     version: "0.8.0"
     repository: "oci://registry.k8s.io/lws/charts"
     condition: lws.enabled
-

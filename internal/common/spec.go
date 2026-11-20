@@ -50,9 +50,6 @@ const (
 	aiGatewayAuthEnabledEnvVar           = "AI_GATEWAY_AUTH_ENABLED"
 	aiGatewayAuthAllowInsecureHTTPEnvVar = "AI_GATEWAY_AUTH_ALLOW_INSECURE_HTTP"
 
-	podMonitorEnabledEnvVar  = "ENABLE_POD_MONITOR"
-	podMonitorIntervalEnvVar = "POD_MONITOR_INTERVAL"
-
 	storageInitializerResourcesEnvVar = "STORAGE_INITIALIZER_RESOURCES"
 
 	// kserveNamespaceEnvVar names KServe's system namespace, where the chart
@@ -133,22 +130,6 @@ func AIGatewayAuthEnabled() bool {
 // plain HTTP listener (local development only).
 func AIGatewayAuthAllowInsecureHTTP() bool {
 	return os.Getenv(aiGatewayAuthAllowInsecureHTTPEnvVar) == "true"
-}
-
-// PodMonitorEnabled reports whether the provider emits a Prometheus Operator
-// PodMonitor per Instance. Off by default so clusters without the
-// monitoring.coreos.com CRDs are never touched.
-func PodMonitorEnabled() bool {
-	return os.Getenv(podMonitorEnabledEnvVar) == "true"
-}
-
-// PodMonitorInterval returns the scrape interval for generated PodMonitors,
-// defaulting to 30s when unset.
-func PodMonitorInterval() string {
-	if interval := os.Getenv(podMonitorIntervalEnvVar); interval != "" {
-		return interval
-	}
-	return "30s"
 }
 
 // StorageInitializerResources returns the chart-configured resources for

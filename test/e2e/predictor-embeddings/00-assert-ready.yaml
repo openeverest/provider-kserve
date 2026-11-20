@@ -3,6 +3,8 @@ kind: Instance
 metadata:
   name: test-predictor-minilm
 status:
-  phase: Ready
+  phase: Provisioned
+  (conditions[?type == 'Ready']):
+    - status: "True"
   (conditions[?type == 'ConnectionDetailsReady']):
     - status: "True"
