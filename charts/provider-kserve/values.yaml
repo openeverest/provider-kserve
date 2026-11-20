@@ -105,10 +105,11 @@ provider:
   # used in other contexts where a short concise provider identifier is needed.
   shortName: kserve
 
-# -- Default instance presets configuration
-# Each preset must have 'name', 'enabled', and 'spec' fields.
-# The 'spec' field contains the full InstancePresetSpec.
-# Note: The provider shortName will be automatically added to each preset name.
+# -- ClusterInstancePresets installed with the provider: starting points users
+# pick when they create an Instance in any namespace. Each entry has a 'name'
+# (prefixed with provider.shortName), 'enabled', and a 'spec' (an Instance spec;
+# providerRef is set by the chart). Presets are cluster-scoped, so a spec must
+# not reference namespaced objects such as Secrets.
 presets:
   # smollm-cpu — a tiny, ungated model on CPU-only nodes. Sized for local
   # development and smoke tests (k3d/kind/minikube): no GPU required, and the
@@ -116,8 +117,6 @@ presets:
   - name: smollm-cpu
     enabled: true
     spec:
-      providerRef:
-        name: provider-kserve
       topology:
         type: llm
       components:
@@ -148,8 +147,6 @@ presets:
   - name: qwen-gpu
     enabled: true
     spec:
-      providerRef:
-        name: provider-kserve
       topology:
         type: llm
       components:
