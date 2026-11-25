@@ -15,6 +15,13 @@ package provider
 // The runtime counts the labelled component pods into Instance status.components.
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 
+// Startup gate (provider-runtime holds a new build until the installed
+// OpenEverest supports its contract version, then records that version on
+// this provider's Provider; keep resourceNames in sync with
+// common.ProviderName):
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,resourceNames=providers.core.openeverest.io,verbs=get
+// +kubebuilder:rbac:groups=core.openeverest.io,resources=providers/status,resourceNames=provider-kserve,verbs=patch
+
 // =============================================================================
 // PROVIDER-SPECIFIC RBAC — KServe serving resources.
 // =============================================================================
