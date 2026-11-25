@@ -18,6 +18,7 @@ import (
 
 	commonv1alpha1 "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
+	"github.com/openeverest/openeverest/v2/contract"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-kserve/definition/components"
@@ -39,7 +40,7 @@ func predictorContext(t *testing.T, cl client.Client, comp corev1alpha1.Componen
 
 func predictorPodLabels() map[string]any {
 	return map[string]any{
-		controller.ProviderLabel:  common.ProviderName,
+		contract.ProviderLabel:    common.ProviderName,
 		controller.InstanceLabel:  "iris",
 		controller.ComponentLabel: common.ComponentPredictor,
 	}
@@ -181,7 +182,7 @@ func TestBuildInferenceServiceIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	labels := isvc.GetLabels()
-	if labels["cost-center"] != "ml" || labels[controller.ProviderLabel] != common.ProviderName || labels["app.kubernetes.io/managed-by"] != "everest" {
+	if labels["cost-center"] != "ml" || labels[contract.ProviderLabel] != common.ProviderName || labels["app.kubernetes.io/managed-by"] != "everest" {
 		t.Fatalf("labels = %v, want the user label next to the provider labels", labels)
 	}
 	annotations := isvc.GetAnnotations()

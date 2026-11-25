@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
+	"github.com/openeverest/openeverest/v2/contract"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-kserve/definition/components"
@@ -361,7 +362,7 @@ func validateCustomContainer(params components.ModelServerCustomSpec, path *fiel
 // and the predictor pods.
 func providerLabelKeys(in *corev1alpha1.Instance) map[string]struct{} {
 	keys := map[string]struct{}{
-		controller.ProviderLabel:  {},
+		contract.ProviderLabel:    {},
 		controller.InstanceLabel:  {},
 		controller.ComponentLabel: {},
 	}
