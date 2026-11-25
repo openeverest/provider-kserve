@@ -44,9 +44,14 @@ openeverest_version = os.getenv('OPENEVEREST_VERSION', '2.0.0-alpha.1')
 openeverest_helm_repo = os.getenv(
     'OPENEVEREST_HELM_REPO', 'https://openeverest.github.io/helm-charts/')
 
-# OpenEverest git ref the core CRDs are refreshed from. Pinned to the tag of the
-# core release above so the CRDs match the provider-runtime in go.mod.
-openeverest_crd_branch = os.getenv('OPENEVEREST_BRANCH', 'v2.0.0-alpha.1')
+# OpenEverest git ref the core CRDs are refreshed from: the core commit go.mod
+# requires, so the CRDs match the provider-runtime in go.mod. Move this together
+# with the core version in go.mod. Those CRDs publish the versions that core
+# serves, which the chart's stamp is checked against: the released core above
+# publishes none, so on its own CRDs the chart would refuse to install and the
+# provider would stay unready. Its CRDs differ from those of this commit only
+# by additions, which the released core ignores.
+openeverest_crd_branch = os.getenv('OPENEVEREST_BRANCH', 'e7eb057b51cb7bbc6c803161ef530dc1cb8e9b08')
 
 # Namespaces.
 everest_namespace = os.getenv('EVEREST_NAMESPACE', 'everest-system')
