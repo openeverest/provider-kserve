@@ -78,3 +78,5 @@ dependencies:
     version: "0.8.0"
     repository: "oci://registry.k8s.io/lws/charts"
     condition: lws.enabled
+annotations:
+  openeverest.io/contract-version: "2.0.0-alpha.1.next"

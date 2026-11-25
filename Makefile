@@ -103,16 +103,21 @@ generate: manifests helm-sync-rbac sync-kserve-objects sync-dashboards ## Run al
 	go generate ./...
 	@echo "All generation complete."
 
+GENERATED_PATHS = config/ $(CHART_DIR)/generated/ $(CHART_DIR)/files/ $(CHART_DIR)/Chart.yaml \
+	$(CHART_DIR)/templates/_openeverest_contract.tpl $(CHART_DIR)/templates/openeverest-compat-check.yaml
+
 .PHONY: verify
-verify: ## Verify that generated files are up-to-date (for CI).
+verify: ## Verify that generated files are up-to-date and the chart is stamped with the OpenEverest it is built against (for CI).
 	@$(MAKE) generate
-	@if git diff --quiet -- config/ $(CHART_DIR)/generated/ $(CHART_DIR)/files/; then \
+	@if [ -z "$$(git status --porcelain -- $(GENERATED_PATHS))" ]; then \
 		echo "Generated files are up-to-date."; \
 	else \
 		echo "ERROR: Generated files are out of date. Run 'make generate' and commit the changes."; \
-		git diff -- config/ $(CHART_DIR)/generated/ $(CHART_DIR)/files/; \
+		git status --short -- $(GENERATED_PATHS); \
+		git diff -- $(GENERATED_PATHS); \
 		exit 1; \
 	fi
+	go tool provider-sdk verify --chart-dir $(CHART_DIR)
 
 ##@ Build
 
