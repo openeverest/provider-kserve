@@ -62,6 +62,11 @@ without `--version` takes the latest.
 | `0.2.0` – `0.2.2` | `>= 2.0.0-dev.2` | `0.21.0-rc1` | `1.30` – `1.36` |
 | `0.1.x` | `>= 2.0.0-dev.2` | `0.20.0` | `1.30` – `1.34` |
 
+Each chart also names the OpenEverest it is built for, in the `openeverest.io/contract-version`
+annotation of its `Chart.yaml`, which `make generate` writes. A Helm install on an OpenEverest
+that does not serve that version fails, and a build applied any other way waits, unready, until
+OpenEverest serves it; see [Installation](#installation).
+
 From `0.2.3` the provider reports per-component status and applies pod scheduling policies,
 which need the Instance API of OpenEverest `2.0.0-dev.4`.
 
@@ -152,6 +157,23 @@ helm install provider-kserve charts/provider-kserve --namespace everest-system
   `ClusterStorageContainer`, or a predictor `config` the server-side dry run of its
   `InferenceService` rejects. `kubectl` prints a warning, and the `Instance` reports it once
   created.
+- With Helm or Flux, the install fails, before anything is applied, when the OpenEverest in the
+  cluster does not serve the OpenEverest the chart is built for, and the error names the
+  OpenEverest it needs. Argo CD, and any tool that applies pre-rendered manifests, renders the
+  chart without reading the cluster, so that check passes there. Whichever tool applies it, a
+  new build of the provider that the installed OpenEverest does not support stays alive but
+  unready until OpenEverest does, and a Warning Event on the `Provider` says why (see
+  [Troubleshooting](#troubleshooting)). Under the default `RollingUpdate` strategy, the
+  previous build, if any, keeps serving meanwhile.
+- To install anyway, set `compatibility.acknowledge.coreVersion` to the OpenEverest version the
+  cluster runs, which the error also names. The chart writes it on the `Provider` and the
+  presets as `openeverest.io/compatibility-acknowledged`, and the provider reads it on its
+  `Provider` at startup, so it lets a held build start too. It holds on that release and on
+  later ones that keep its contract, such as its patch releases, and expires with the first
+  OpenEverest release that changes the contract, which is checked again.
+- The chart sets no annotation for any tool itself: `openeverest.annotations` adds annotations
+  to the `Provider` and the presets, such as `argocd.argoproj.io/sync-wave: "-1"` to have
+  Argo CD apply them before the provider's `Deployment` and the bundled KServe controllers.
 
 > [!NOTE]
 > If you set `cert-manager.enabled=true`, the cert-manager webhook may not be ready when the
@@ -1269,7 +1291,7 @@ cluster for you.
 
 ```bash
 make dev-up             # local k3d cluster + Tilt dev environment
-make generate           # RBAC, provider spec, vendored presets, Helm chart sync
+make generate           # RBAC, provider spec, vendored presets, Helm chart sync, OpenEverest stamp
 make run                # run the provider locally against the cluster
 make test               # unit tests
 make test-reconcile     # fast chainsaw suites under test/reconcile/
@@ -1285,8 +1307,9 @@ cp dev/.env.example dev/.env   # set K8S_CONTEXT, and DOCKER_REGISTRY_URL for a 
 tilt up -f dev/Tiltfile
 ```
 
-`make help` lists every target. `make verify` fails when generated files are stale — run
-`make generate` and commit the result.
+`make help` lists every target. `make verify` fails when generated files are stale or the chart
+is not stamped with the OpenEverest the provider is built against — run `make generate` and
+commit the result.
 
 The provider contract (`Validate` / `Sync` / `Status` / `Cleanup`), RBAC markers, watches,
 and code generation are documented once for all providers in
@@ -1304,7 +1327,7 @@ and code generation are documented once for all providers in
 | `internal/provider/` | `ProviderInterface` implementation, AI Gateway wiring, RBAC markers |
 | `internal/common/` | Component name constants |
 | `definition/` | Provider identity, component types, versions, topologies |
-| `charts/provider-kserve/` | Helm chart (`generated/` and `files/` are produced by `make generate`) |
+| `charts/provider-kserve/` | Helm chart (`generated/`, `files/`, the `Chart.yaml` stamp, `templates/_openeverest_contract.tpl` and `templates/openeverest-compat-check.yaml` are produced by `make generate`) |
 | `config/rbac/role.yaml` | Generated `ClusterRole` — do not edit |
 | `docs/` | Deployment, TLS, observability, and [multi-node LLM](docs/llm-multi-node.md) guides; Grafana dashboards |
 | `test/reconcile/` | Fast chainsaw suites (`llm`, `predictor`): the CR the provider derives, and its garbage collection |
@@ -1341,6 +1364,7 @@ kubectl logs -n everest-system deploy/provider-kserve -f
 | `Instance` stuck in `Creating` | `kubectl describe instance <name>` conditions, then the provider logs |
 | No `Provider` resource in the cluster | Is the chart installed? Check the provider deployment logs |
 | `Instance` ignored entirely | `spec.providerRef.name` must be `provider-kserve` |
+| New provider pod running but never `Ready` | It waits until the installed OpenEverest supports this build: the Warning Event in `kubectl describe provider provider-kserve` says why |
 | `unsupported topology ""` | `spec.topology.type` is required — set `llm` or `predictor` |
 | `ConfigNotFound: kserve-config-llm-template` | The LLM presets are missing; keep `llmPresets.enabled=true` |
 | `predictor` instance has no runtime | Keep `kserveRuntimeConfigs.enabled=true`; check the `<release>-kserve-objects` hook Job logs |

@@ -59,6 +59,14 @@
   verbs:
     - get
 - apiGroups:
+    - apiextensions.k8s.io
+  resourceNames:
+    - providers.core.openeverest.io
+  resources:
+    - customresourcedefinitions
+  verbs:
+    - get
+- apiGroups:
     - coordination.k8s.io
   resources:
     - leases
@@ -102,6 +110,14 @@
     - get
     - list
     - watch
+- apiGroups:
+    - core.openeverest.io
+  resourceNames:
+    - provider-kserve
+  resources:
+    - providers/status
+  verbs:
+    - patch
 - apiGroups:
     - gateway.envoyproxy.io
   resources:
